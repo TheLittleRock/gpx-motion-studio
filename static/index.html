@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPX & Map Motion Graphics Studio — DaVinci Resolve Edition</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- TOP HEADER -->
+  <header class="studio-header">
+    <div class="logo-area">
+      <span class="logo-badge">STUDIO</span>
+      <h1 class="logo-title">GPX <span>MOTION</span></h1>
+      <span class="davinci-badge">DaVinci Resolve</span>
+    </div>
+
+    <div class="header-center">
+      <!-- Project Selector Modal Trigger -->
+      <div class="project-selector-group">
+        <button class="project-select-btn" id="btnOpenProjectsModal" title="Správce projektů (Uložit, otevřít, duplikovat)">
+          📁 Projekt: <span id="currentProjectName" style="color:var(--accent-cyan);">Načítání...</span> ▾
+        </button>
+      </div>
+
+      <!-- Map Style Quick Switch -->
+      <div class="style-toggle-group">
+        <button class="style-toggle-btn active" id="btnStylePanorama" title="Vysoké rozlišení Mapy.com Panorama (Styl A)">
+          🗺️ Mapy.com
+        </button>
+        <button class="style-toggle-btn" id="btnStyleVector" title="Průhledná minimalistická vektorová mapa (Styl B GTA Radar)">
+          🧭 GTA Vektor
+        </button>
+      </div>
+
+      <!-- Speed Ramp Panel Toggle -->
+      <button class="tool-btn" id="btnToggleSpeedRamp" title="Otevřít / Zavřít Bezier Speed Ramp křivku rychlosti">
+        ⚡ Speed Ramp
+      </button>
+
+      <button class="btn btn-secondary" id="btnUploadTrigger" title="Nahrát GPX nebo obrázek mapy">
+        + Importovat GPX
+      </button>
+      <input type="file" id="fileUploadInput" accept=".gpx,.png,.jpg,.jpeg,.webp" style="display:none;">
+    </div>
+
+    <div class="header-actions">
+      <button class="btn btn-fusion" id="btnOpenFusionModal">
+        ✨ Fusion Makro (.setting)
+      </button>
+      <button class="btn btn-primary" id="btnOpenExportModal">
+        🎬 Export DaVinci Videa
+      </button>
+    </div>
+  </header>
+
+  <!-- STUDIO BODY -->
+  <main class="studio-body">
+    <!-- VIEWPORT & CANVAS -->
+    <section class="viewport-area">
+      <!-- VIEWPORT TOOLBAR -->
+      <div class="viewport-toolbar">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label style="font-weight:700; font-size:11px; color:var(--text-muted);">Režim animace:</label>
+          <select id="animModeSelect" class="tool-btn" style="background:var(--bg-input); font-weight:700; color:var(--accent-cyan); height:28px;">
+            <option value="hud" selected>📊 Telemetrie HUD (Průhledný overlay)</option>
+            <option value="flyover">🚁 Dynamický přelet (Kamera na mapě)</option>
+            <option value="fullscreen">🗺️ Celá trasa (Animovaný přehled)</option>
+            <option value="spotlight">🔍 Zaměření místa (Přiblížení na bod)</option>
+          </select>
+        </div>
+
+        <div class="viewport-stats">
+          <div class="stat-item">Vzdálenost: <span class="stat-val" id="statDistance">-- km</span></div>
+          <div class="stat-item">Nastoupáno: <span class="stat-val" id="statGain">+-- m</span></div>
+          <div class="stat-item">Vrchol: <span class="stat-val" id="statPeak">-- m</span></div>
+          <div class="stat-item">Body: <span class="stat-val" id="statPoints">--</span></div>
+        </div>
+
+        <div class="viewport-tools">
+          <select id="resSelect" class="tool-btn" style="background:var(--bg-input);">
+            <option value="1920x1080">1080p (1920x1080)</option>
+            <option value="3840x2160">4K UHD (3840x2160)</option>
+          </select>
+          <button class="tool-btn active" id="btnToggleChecker" title="Přepnout šachovnici pro průhlednost (Alpha)">
+            🏁 Mřížka
+          </button>
+          <button class="tool-btn" id="btnResetView" title="Resetovat pohled">
+            🔍 Reset
+          </button>
+        </div>
+      </div>
+
+      <!-- CANVAS CONTAINER -->
+      <div class="canvas-container checkerboard-bg" id="canvasContainer">
+        <canvas id="renderCanvas" width="1920" height="1080"></canvas>
+        <div class="calibration-banner" id="calibrationBanner">
+          <span id="calibrationStepText">🎯 Krok 1: Klikněte na START trasy na mapě</span>
+          <button class="btn btn-secondary" id="btnCancelCalibration" style="padding:2px 8px; font-size:10px;">Zrušit</button>
+        </div>
+      </div>
+
+      <!-- SPEED RAMP BEZIER GRAPH (COLLAPSIBLE) -->
+      <div class="speed-ramp-panel" id="speedRampPanel">
+        <div class="speed-ramp-header">
+          <div class="speed-ramp-title">
+            <span>⚡ DaVinci Resolve Bezier Speed Ramp</span>
+            <span style="color:var(--text-dim); font-weight:400;">(Kliknutím přidejte klíčový snímek, tažením změňte rychlost 0.25x – 6.0x)</span>
+          </div>
+          <div class="speed-ramp-presets">
+            <span style="color:var(--text-muted); font-size:10.5px; align-self:center;">Předvolby:</span>
+            <button class="speed-preset-btn" id="btnSpeedUniform">Rovnoměrně (1x)</button>
+            <button class="speed-preset-btn" id="btnSpeedFastTransfers">Rychlé přejezdy</button>
+            <button class="speed-preset-btn" id="btnSpeedClimbSlowdown">Zpomalení ve stoupání</button>
+          </div>
+        </div>
+        <div class="speed-curve-canvas-wrap">
+          <canvas id="speedCurveCanvas" width="1200" height="90"></canvas>
+        </div>
+      </div>
+
+      <!-- BOTTOM TIMELINE -->
+      <div class="timeline-area">
+        <div class="timeline-upper">
+          <div class="transport-controls">
+            <button class="transport-btn" id="btnRewind" title="Na začátek">⏮</button>
+            <button class="transport-btn btn-play" id="btnPlayPause" title="Přehrát / Pozastavit (Mezerník)">▶</button>
+            <button class="transport-btn" id="btnLoop" title="Smyčka">🔁</button>
+            <select id="speedSelect" class="tool-btn" style="height:28px;">
+              <option value="0.5">0.5x</option>
+              <option value="1.0" selected>1.0x</option>
+              <option value="2.0">2.0x</option>
+            </select>
+          </div>
+
+          <div class="timecode-display">
+            <span class="timecode-cur" id="timecodeCurrent">00:00.0</span>
+            <span class="timecode-sep">/</span>
+            <span class="timecode-total" id="timecodeTotal">00:10.0</span>
+            <span style="color:var(--text-dim); margin-left:8px;">[Snímek <span id="frameCurrent">0</span>/<span id="frameTotal">300</span>]</span>
+          </div>
+
+          <div class="timeline-options">
+            <span>Délka:</span>
+            <div class="duration-pills">
+              <div class="duration-pill" data-dur="5">5s</div>
+              <div class="duration-pill active" data-dur="10">10s</div>
+              <div class="duration-pill" data-dur="15">15s</div>
+              <div class="duration-pill" data-dur="30">30s</div>
+            </div>
+            <button class="btn btn-secondary" id="btnQuickAddWp" style="padding:4px 8px; font-size:11px;">
+              + Přidat bod
+            </button>
+          </div>
+        </div>
+
+        <!-- SCRUBBER TRACK -->
+        <div class="scrubber-track-container" id="scrubberTrack">
+          <div class="scrubber-ticks"></div>
+          <div class="scrubber-segment-range" id="scrubberSegmentRange" style="left:0%; width:100%;"></div>
+          <div class="scrubber-progress-fill" id="scrubberProgressFill"></div>
+          <div class="scrubber-head" id="scrubberHead" style="left:0%;"></div>
+          <div id="timelineWaypointsContainer"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT INSPECTOR PANEL (400px) -->
+    <aside class="inspector-panel">
+      <div class="inspector-tabs">
+        <div class="inspector-tab active" data-tab="tabProject">Trasa & Projekt</div>
+        <div class="inspector-tab" data-tab="tabStyles">Vzhled & Prvky</div>
+        <div class="inspector-tab" data-tab="tabMap">Mapa & Styl</div>
+        <div class="inspector-tab" data-tab="tabTelemetry">Telemetrie & Čas</div>
+        <div class="inspector-tab" data-tab="tabLandmarks">Body & Řeky</div>
+      </div>
+
+      <div class="inspector-content">
+        <!-- TAB 1: PROJECT & GPX TRACK -->
+        <div class="inspector-tab-pane active" id="paneProject">
+          <div class="section-title">Aktivní Projekt (SQLite)</div>
+          <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:12px;">
+            <div style="font-weight:700; color:#fff; font-size:13px; margin-bottom:4px;" id="projectDetailName">Výlet Praha – České Budějovice</div>
+            <div style="color:var(--text-muted); font-size:11px; margin-bottom:8px;" id="projectDetailMeta">ID: default • Aktualizováno: Dnes</div>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-secondary" id="btnDuplicateCurrentProject" style="flex:1; padding:3px 6px; font-size:10.5px;">📑 Duplikovat</button>
+              <button class="btn btn-secondary" id="btnRenameCurrentProject" style="flex:1; padding:3px 6px; font-size:10.5px;">✏️ Přejmenovat</button>
+            </div>
+          </div>
+
+          <div class="section-title">Výběr a Nahrání Trasy</div>
+          <div class="form-group">
+            <div class="form-label"><span>Dostupné GPX trasy</span></div>
+            <select id="gpxSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input); font-weight:600;"></select>
+          </div>
+
+          <!-- Clean Onboarding Dropzone -->
+          <div id="dropzoneBox" style="border:2px dashed var(--border-color); border-radius:8px; padding:24px 16px; text-align:center; background:rgba(11, 13, 18, 0.6); cursor:pointer; margin-bottom:14px; transition:border-color 0.2s;">
+            <div style="font-size:24px; margin-bottom:6px;">🚴‍♂️</div>
+            <div style="font-weight:700; font-size:12px; color:#fff;">Přetáhněte novou GPX trasu</div>
+            <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">Nebo klikněte pro výběr ze svého počítače</div>
+          </div>
+
+          <div class="section-title">Podkladový Obrázek Mapy</div>
+          <div class="form-group">
+            <div class="form-label"><span>Dostupné snímky map</span></div>
+            <select id="mapSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);"></select>
+          </div>
+        </div>
+
+        <!-- TAB 2: STYLES & ELEMENTS -->
+        <div class="inspector-tab-pane" id="paneStyles">
+          <div class="section-title">Nezávislé Barvy Prvků</div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <div class="form-label"><span>Aktivní trasa</span></div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="color" id="colorPath" value="#00F0FF" class="color-picker-input">
+                <span class="form-val" id="colorPathVal">#00F0FF</span>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <div class="form-label"><span>Výškový profil</span></div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="color" id="colorElevation" value="#FFB703" class="color-picker-input">
+                <span class="form-val" id="colorElevationVal">#FFB703</span>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <div class="form-label"><span>Texty & Hodnoty</span></div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="color" id="colorText" value="#FFFFFF" class="color-picker-input">
+                <span class="form-val" id="colorTextVal">#FFFFFF</span>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <div class="form-label"><span>Řeky (Vltava atd.)</span></div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="color" id="colorRiver" value="#00A8FF" class="color-picker-input">
+                <span class="form-val" id="colorRiverVal">#00A8FF</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-title">Styl Značek Start & Cíl</div>
+          <div class="form-group">
+            <div class="form-label"><span>Vzhled ikon (žádné terče)</span></div>
+            <select id="markerStyleSelect" class="tool-btn" style="width:100%; height:30px; background:var(--bg-input);">
+              <option value="pill" selected>Sleek Glass Pilulka (např. [ START • Praha ])</option>
+              <option value="pin">Klasický špendlík (Teardrop Pin)</option>
+              <option value="ring">Zářící neonový kruh (Glowing Ring)</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:10px; margin-bottom:12px;">
+            <div class="form-group" style="flex:1; margin-bottom:0;">
+              <div class="form-label"><span>Název Startu</span></div>
+              <input type="text" id="startCityInput" class="tool-btn" style="width:100%; height:28px; background:var(--bg-input); text-align:left; padding:4px 8px;" value="Praha">
+            </div>
+            <div class="form-group" style="flex:1; margin-bottom:0;">
+              <div class="form-label"><span>Název Cíle</span></div>
+              <input type="text" id="finishCityInput" class="tool-btn" style="width:100%; height:28px; background:var(--bg-input); text-align:left; padding:4px 8px;" value="České Budějovice">
+            </div>
+          </div>
+
+          <div class="section-title">Globální Měřítko & 4K Podpora</div>
+          <div class="form-group">
+            <div class="form-label"><span>Velikost HUD prvků (pro 4K)</span><span class="form-val" id="hudScaleVal">1.00x</span></div>
+            <input type="range" class="form-range" id="hudScaleSlider" min="0.6" max="2.5" step="0.05" value="1.0">
+          </div>
+
+          <div class="section-title">Linka a Záře</div>
+          <div class="form-group">
+            <div class="form-label"><span>Tloušťka linky</span><span class="form-val" id="lineWidthVal">5px</span></div>
+            <input type="range" class="form-range" id="lineWidthSlider" min="2" max="14" value="5">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Intenzita záře (Glow)</span><span class="form-val" id="glowVal">Vysoká</span></div>
+            <input type="range" class="form-range" id="glowSlider" min="0" max="3" value="2">
+          </div>
+
+          <div class="section-title">Přepínače Prvků (Izolovaný Export)</div>
+          <div class="toggle-item">
+            <span>Minimapa trasy</span>
+            <label class="toggle-switch"><input type="checkbox" id="toggleMiniMap" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <span>Výškový profil</span>
+            <label class="toggle-switch"><input type="checkbox" id="toggleElevation" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <span>Telemetrie</span>
+            <label class="toggle-switch"><input type="checkbox" id="toggleStats" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <span>Digitální hodiny jízdy</span>
+            <label class="toggle-switch"><input type="checkbox" id="toggleClock"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <span>Vrstva řek (Vltava, Sázava atd.)</span>
+            <label class="toggle-switch"><input type="checkbox" id="toggleRivers" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <span>Body zájmu (Landmarks)</span>
+            <label class="toggle-switch"><input type="checkbox" id="toggleWaypoints" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <span>Pulzující bod jezdce</span>
+            <label class="toggle-switch"><input type="checkbox" id="toggleRiderDot" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <span>Podkladová mapa (Styl A / Styl B)</span>
+            <label class="toggle-switch"><input type="checkbox" id="toggleBgMap" checked><span class="toggle-slider"></span></label>
+          </div>
+
+          <div class="section-title">Ořez Úseku Trasy (Trim)</div>
+          <div class="form-group">
+            <div class="form-label"><span>Rozsah animace</span><span class="form-val" id="trimVal">0% — 100%</span></div>
+            <div style="display:flex; gap:8px;">
+              <input type="range" class="form-range" id="trimInSlider" min="0" max="95" value="0">
+              <input type="range" class="form-range" id="trimOutSlider" min="5" max="100" value="100">
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: MAP & STYLE -->
+        <div class="inspector-tab-pane" id="paneMap">
+          <div class="section-title">Volba Stylu Mapy</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
+            <button class="btn btn-secondary" id="btnSelectStyleA" style="justify-content:center;">🗺️ Mapy.com Panorama</button>
+            <button class="btn btn-secondary" id="btnSelectStyleB" style="justify-content:center;">🧭 GTA Vektor Radar</button>
+          </div>
+
+          <div class="section-title">Podklad z Mapy.com & Panorama</div>
+          <button class="btn btn-primary" id="btnQuickStitch" style="width:100%; justify-content:center; margin-bottom:12px;">
+            ⚡ Vygenerovat čistou mapu trasy
+          </button>
+
+          <div class="section-title">Bezpečné Uložení Mapy.com API Klíče</div>
+          <div class="form-group">
+            <div style="display:flex; gap:6px;">
+              <input type="password" id="mapyApiKeyInput" placeholder="Vložte API Klíč (developer.mapy.com)" class="tool-btn" style="flex:1; height:30px; text-align:left; background:var(--bg-input); font-family:var(--font-mono); font-size:10.5px;">
+              <button class="btn btn-secondary" id="btnSaveApiKey" style="padding:4px 10px;">Uložit</button>
+            </div>
+            <div style="font-size:10px; color:var(--text-dim); margin-top:4px;" id="apiKeyStatusText">
+              Klíč je bezpečně uložen v lokální SQLite databázi a nikdy se neposílá na GitHub.
+            </div>
+          </div>
+
+          <div class="section-title">Virtuální Kamera (Režim Přeletu)</div>
+          <div class="form-group">
+            <div class="form-label"><span>Přiblížení kamery (Zoom)</span><span class="form-val" id="camZoomVal">2.2x</span></div>
+            <input type="range" class="form-range" id="camZoomSlider" min="1.0" max="4.5" step="0.1" value="2.2">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Plynulost tlumení (Damping)</span><span class="form-val" id="camDampingVal">0.10</span></div>
+            <input type="range" class="form-range" id="camDampingSlider" min="0.03" max="0.30" step="0.01" value="0.10">
+          </div>
+          <div class="toggle-item">
+            <span>Rotace kamery podle směru jízdy</span>
+            <label class="toggle-switch"><input type="checkbox" id="toggleCamHeading"><span class="toggle-slider"></span></label>
+          </div>
+
+          <div class="section-title">Jemná Úprava Pozice Trasy na Mapě</div>
+          <div class="form-group">
+            <div class="form-label"><span>Měřítko trasy</span><span class="form-val" id="calibScaleVal">1.00x</span></div>
+            <input type="range" class="form-range" id="calibScaleSlider" min="0.5" max="2.0" step="0.01" value="1.0">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Posun X (px)</span><span class="form-val" id="calibOffsetXVal">0</span></div>
+            <input type="range" class="form-range" id="calibOffsetXSlider" min="-250" max="250" value="0">
+          </div>
+          <div class="form-group">
+            <div class="form-label"><span>Posun Y (px)</span><span class="form-val" id="calibOffsetYVal">0</span></div>
+            <input type="range" class="form-range" id="calibOffsetYSlider" min="-250" max="250" value="0">
+          </div>
+        </div>
+
+        <!-- TAB 4: TELEMETRY & TIME -->
+        <div class="inspector-tab-pane" id="paneTelemetry">
+          <div class="section-title">Modulární Telemetrie (3 Sloty)</div>
+          <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px; line-height:1.4;">
+            Čísla i jednotky mají pevnou šířku (monospace tabular-nums) a garantovaně se nepřekrývají.
+          </p>
+
+          <!-- Slot 1 -->
+          <div class="form-group" style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color);">
+            <div class="form-label" style="font-weight:700; color:#fff;"><span>Slot 1:</span></div>
+            <div style="display:flex; gap:8px;">
+              <select id="teleSlot1Type" class="tool-btn" style="flex:1; height:28px; background:var(--bg-panel);">
+                <option value="dist" selected>Vzdálenost (km)</option>
+                <option value="ele">Nadmořská výška (m)</option>
+                <option value="gain">Celkové nastoupáno (m)</option>
+                <option value="time">Čas jízdy (HH:MM)</option>
+              </select>
+              <input type="text" id="teleSlot1Label" class="tool-btn" style="flex:1; height:28px; background:var(--bg-panel); text-align:left; padding:4px 8px;" value="VZDÁLENOST">
+            </div>
+          </div>
+
+          <!-- Slot 2 -->
+          <div class="form-group" style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color);">
+            <div class="form-label" style="font-weight:700; color:#fff;"><span>Slot 2:</span></div>
+            <div style="display:flex; gap:8px;">
+              <select id="teleSlot2Type" class="tool-btn" style="flex:1; height:28px; background:var(--bg-panel);">
+                <option value="ele" selected>Nadmořská výška (m)</option>
+                <option value="gain">Celkové nastoupáno (m)</option>
+                <option value="dist">Vzdálenost (km)</option>
+                <option value="speed">Rychlost (km/h)</option>
+              </select>
+              <input type="text" id="teleSlot2Label" class="tool-btn" style="flex:1; height:28px; background:var(--bg-panel); text-align:left; padding:4px 8px;" value="NADMOŘSKÁ VÝŠKA">
+            </div>
+          </div>
+
+          <!-- Slot 3 -->
+          <div class="form-group" style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color);">
+            <div class="form-label" style="font-weight:700; color:#fff;"><span>Slot 3 (Namísto sklonu):</span></div>
+            <div style="display:flex; gap:8px;">
+              <select id="teleSlot3Type" class="tool-btn" style="flex:1; height:28px; background:var(--bg-panel);">
+                <option value="time" selected>Čas jízdy (HH:MM)</option>
+                <option value="gain">Celkové nastoupáno (m)</option>
+                <option value="speed">Rychlost (km/h)</option>
+                <option value="grade">Sklon trasy (%)</option>
+              </select>
+              <input type="text" id="teleSlot3Label" class="tool-btn" style="flex:1; height:28px; background:var(--bg-panel); text-align:left; padding:4px 8px;" value="ČAS JÍZDY">
+            </div>
+          </div>
+
+          <div class="section-title">Časový Plánovač & Hodiny</div>
+          <div style="display:flex; gap:8px; margin-bottom:10px;">
+            <div class="form-group" style="flex:1; margin-bottom:0;">
+              <div class="form-label"><span>Čas startu</span></div>
+              <input type="time" id="clockStartTime" class="tool-btn" style="width:100%; height:28px; background:var(--bg-input);" value="08:30">
+            </div>
+            <div class="form-group" style="flex:1; margin-bottom:0;">
+              <div class="form-label"><span>Čas v cíli</span></div>
+              <input type="time" id="clockFinishTime" class="tool-btn" style="width:100%; height:28px; background:var(--bg-input);" value="15:45">
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 5: LANDMARKS & RIVERS -->
+        <div class="inspector-tab-pane" id="paneLandmarks">
+          <div class="section-title">Vyhledat a Přidat Místo v ČR</div>
+          <div style="display:flex; gap:6px; margin-bottom:10px;">
+            <input type="text" id="landmarkSearchInput" placeholder="Např. Tábor, Vltava, Zvíkov..." class="tool-btn" style="flex:1; height:32px; text-align:left; background:var(--bg-input); padding:4px 10px;">
+            <button class="btn btn-secondary" id="btnSearchLandmark" style="padding:4px 12px;">Hledat</button>
+          </div>
+          <div id="landmarkSearchResults" style="max-height:120px; overflow-y:auto; margin-bottom:12px;"></div>
+
+          <div class="section-title">Aktivní Body & Milníky Trasy</div>
+          <button class="btn btn-secondary" id="btnAddWpAtCurrent" style="width:100%; justify-content:center; margin-bottom:12px;">
+            + Vložit bod na aktuální pozici
+          </button>
+          <div id="waypointsListContainer"></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- PROJECT MANAGEMENT MODAL -->
+  <div class="modal-overlay" id="projectsModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span>📁 Správa Projektů (SQLite)</span>
+        <button class="modal-close-btn" id="btnCloseProjectsModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px; line-height:1.4;">
+          Všechna nastavení, křivky rychlosti, rozložení HUD a body jsou bezpečně uloženy v lokální databázi <code>./data/projects.db</code>.
+        </p>
+
+        <div class="project-list-box" id="projectsListContainer"></div>
+
+        <div class="form-group" style="margin-top:12px;">
+          <div class="form-label"><span>Vytvořit nový projekt</span></div>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="newProjectNameInput" placeholder="Název nového projektu..." class="tool-btn" style="flex:1; height:32px; text-align:left; background:var(--bg-input); padding:4px 10px;">
+            <button class="btn btn-emerald" id="btnCreateNewProject">+ Vytvořit</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCloseProjectsModalBottom">Zavřít</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANORAMA DOWNLOAD MODAL -->
+  <div class="modal-overlay" id="panoramaModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span>🗺️ Stáhnout a Sešít Panorama z Mapy.com</span>
+        <button class="modal-close-btn" id="btnClosePanoramaModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px; line-height:1.4;">
+          Automaticky stáhne dlaždice v poměru 16:9 se 40% rezervou podél celé trasy bez černých okrajů a bez vodoznaků.
+        </p>
+
+        <div class="form-group">
+          <div class="form-label"><span>Zdroj mapy</span></div>
+          <select id="stitchProviderSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);">
+            <option value="cyclosm" selected>CyclOSM (Podrobná cyklomapa a vrstevnice • Bez vodoznaku)</option>
+            <option value="opentopo">OpenTopoMap (Topografická mapa ČR • Bez vodoznaku)</option>
+            <option value="osm">OpenStreetMap Standard</option>
+            <option value="mapy_outdoor">Mapy.com Turistická (Vyžaduje API klíč)</option>
+            <option value="mapy_aerial">Mapy.com Letecká / Satelitní (Vyžaduje API klíč)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <div class="form-label"><span>Úroveň detailu (Zoom)</span></div>
+          <select id="stitchZoomSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);">
+            <option value="10">Zoom 10 (Rychlé, celá ČR přehledně)</option>
+            <option value="11" selected>Zoom 11 (Vysoké rozlišení • Doporučeno)</option>
+            <option value="12">Zoom 12 (Ultra detailní ulice a stezky)</option>
+          </select>
+        </div>
+
+        <div class="progress-container" id="stitchProgressContainer" style="display:none;">
+          <div class="progress-bar"><div class="progress-bar-fill" id="stitchProgressBarFill"></div></div>
+          <div class="progress-label">
+            <span id="stitchProgressStatus">Stahuji mapové dlaždice...</span>
+            <span id="stitchProgressPct">0%</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCancelPanorama">Zrušit</button>
+        <button class="btn btn-primary" id="btnStartPanoramaStitch">🚀 Vygenerovat panorama</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIDEO EXPORT MODAL -->
+  <div class="modal-overlay" id="exportModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span>🎬 Export DaVinci Resolve Videa s Alfou</span>
+        <button class="modal-close-btn" id="btnCloseExportModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px; line-height:1.4;">
+          Vygeneruje video s plnou průhledností (Alpha kanál). Soubor Apple ProRes 4444 stačí přímo přetáhnout do DaVinci Resolve nad vaše video z kola.
+        </p>
+
+        <div class="form-group">
+          <div class="form-label"><span>Formát videa</span></div>
+          <select id="exportFormatSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);">
+            <option value="prores4444">Apple ProRes 4444 (.mov s Alpha kanálem) [Nativní pro DaVinci]</option>
+            <option value="png_sequence">PNG Sekvence snímků (.png)</option>
+            <option value="webm">WebM VP9 Průhledné (.webm)</option>
+          </select>
+        </div>
+
+        <div style="display:flex; gap:12px; margin-bottom:12px;">
+          <div class="form-group" style="flex:1;">
+            <div class="form-label"><span>Snímková frekvence</span></div>
+            <select id="exportFpsSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);">
+              <option value="60">60 FPS (Ultra plynulé)</option>
+              <option value="30" selected>30 FPS (Standardní)</option>
+              <option value="25">25 FPS (PAL)</option>
+              <option value="24">24 FPS (Film)</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1;">
+            <div class="form-label"><span>Rozlišení</span></div>
+            <select id="exportResSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);">
+              <option value="1920x1080">1080p (1920x1080)</option>
+              <option value="3840x2160">4K UHD (3840x2160)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="toggle-item" style="margin-bottom:12px;">
+          <span>Motion Blur (180° pohybové rozmazání kamery)</span>
+          <label class="toggle-switch"><input type="checkbox" id="exportMotionBlur"><span class="toggle-slider"></span></label>
+        </div>
+
+        <div class="progress-container" id="exportProgressContainer" style="display:none;">
+          <div class="progress-bar"><div class="progress-bar-fill" id="exportProgressBarFill"></div></div>
+          <div class="progress-label">
+            <span id="exportProgressStatus">Renderuji snímky...</span>
+            <span id="exportProgressPct">0%</span>
+          </div>
+        </div>
+
+        <div class="export-result-box" id="exportResultBox">
+          <div style="font-weight:700; color:var(--accent-emerald); margin-bottom:4px;">✓ Export dokončen!</div>
+          <div style="color:var(--text-muted); font-size:11px;" id="exportResultDetails"></div>
+          <div style="margin-top:10px; display:flex; gap:8px;">
+            <a id="btnDownloadExport" href="#" class="btn btn-primary" download style="text-decoration:none; padding:4px 12px; font-size:11px;">
+              ⬇ Stáhnout video
+            </a>
+            <button class="btn btn-secondary" id="btnCopyExportPath" style="padding:4px 12px; font-size:11px;">
+              📋 Zkopírovat cestu k souboru
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCancelExport">Zavřít</button>
+        <button class="btn btn-emerald" id="btnStartExport">🚀 Spustit render videa</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FUSION MACRO MODAL -->
+  <div class="modal-overlay" id="fusionModal">
+    <div class="modal-card" style="width:620px;">
+      <div class="modal-header">
+        <span>✨ Nativní DaVinci Resolve Fusion Makro (.setting)</span>
+        <button class="modal-close-btn" id="btnCloseFusionModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px; line-height:1.4;">
+          Nativní strom uzlů Blackmagic Fusion obsahující <code>Background</code>, <code>Paint</code> uzel s <code>PolylineStroke</code> odpovídající vaší GPX trase a animovanými <code>WriteOnEnd</code> klíčovými snímky!
+        </p>
+        <div class="code-box" id="fusionCodeBox">Generuji Fusion makro...</div>
+        <div style="margin-top:12px; background:rgba(0, 240, 255, 0.08); border:1px solid rgba(0, 240, 255, 0.3); padding:10px; border-radius:4px; font-size:11px; line-height:1.4;">
+          <strong>Jak použít v DaVinci Resolve:</strong>
+          <ol style="margin-left:16px; margin-top:4px;">
+            <li>Klikněte níže na <strong>Zkopírovat makro do schránky</strong>.</li>
+            <li>V DaVinci Resolve přejděte na záložku <strong>Fusion</strong>.</li>
+            <li>Stiskněte <strong>Ctrl+V</strong> přímo do editoru uzlů (Node Editor).</li>
+            <li>Propojte výstup do uzlu <code>MediaOut</code> nebo <code>Merge</code>!</li>
+          </ol>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnDownloadFusionSetting">💾 Stáhnout soubor .setting</button>
+        <button class="btn btn-primary" id="btnCopyFusionMacro">📋 Zkopírovat makro do schránky</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DRAG & DROP OVERLAY -->
+  <div class="drop-overlay" id="dropOverlay">
+    <div class="drop-overlay-box">
+      <div style="font-size:36px; margin-bottom:8px;">📂</div>
+      <div style="font-size:16px; font-weight:700; color:#fff;">Přetáhněte soubor pro import</div>
+      <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Podporuje trasy .GPX a snímky map .PNG / .JPG / .WEBP</div>
+    </div>
+  </div>
+
+  <!-- NOTIFICATION TOAST -->
+  <div class="studio-toast" id="studioToast"></div>
+
+  <!-- SCRIPTS -->
+  <script src="/static/js/canvas_renderer.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

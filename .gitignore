@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local SQLite databases & secure project files
+*.db
+*.sqlite3
+data/
+
+# Environment secrets
+.env
+.env.*
+
+# Generated video and image exports
+exports/
+*.mov
+*.webm
+*.png.tmp
+panorama_*.png
+
+# OS & Editor generated files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*:Zone.Identifier
+
+# Test / Scratch files
+test_*.png
+dummy_*.png
+scratch/

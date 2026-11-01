@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  gpx-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gpx-motion-studio
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persistent SQLite project management database
+      - ./data:/app/data
+      # Exported ProRes 4444 movies and Fusion settings
+      - ./exports:/app/exports
+      # Optional local GPX route files
+      - ./assets:/app/assets
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/projects"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

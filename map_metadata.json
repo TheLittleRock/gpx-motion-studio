@@ -1,0 +1,25 @@
+{
+  "width": 1536,
+  "height": 5632,
+  "zoom": 11,
+  "provider": "mapy_outdoor",
+  "tile_count": 33,
+  "nw_lat": 50.064192,
+  "nw_lon": 14.238281,
+  "se_lat": 48.806863,
+  "se_lon": 14.765625,
+  "min_mx": 0.53955078125,
+  "max_mx": 0.541015625,
+  "min_my": 0.3388671875,
+  "max_my": 0.34423828124999994,
+  "calib_start": {
+    "x": 469.1,
+    "y": 424.0
+  },
+  "calib_end": {
+    "x": 689.3,
+    "y": 4924.0
+  },
+  "filename": "panorama_full_rekola_route_mapy_outdoor.png",
+  "url": "/panorama_full_rekola_route_mapy_outdoor.png"
+}

@@ -1,0 +1,1565 @@
+/**
+ * GPX & Map Motion Graphics Studio v2 — Professional Canvas Motion Graphics Engine
+ * Supports 4 Animation Modes, 2 Core Map Styles (Mapy Panorama / GTA Radar Vector),
+ * Catmull-Rom Spline Rivers, Smart Label Collision Detection, On-Canvas Drag & Scale Gizmo,
+ * Tabular Typography with Fixed Alignment, Departure/Arrival Pinging, and Animated Clock Widget.
+ */
+
+class LabelCollisionResolver {
+  constructor() {
+    this.boxes = [];
+  }
+
+  reset() {
+    this.boxes = [];
+  }
+
+  canPlace(x, y, w, h, pad = 6) {
+    const b1 = { x1: x - pad, y1: y - pad, x2: x + w + pad, y2: y + h + pad };
+    for (const b2 of this.boxes) {
+      if (!(b1.x2 < b2.x1 || b1.x1 > b2.x2 || b1.y2 < b2.y1 || b1.y1 > b2.y2)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  place(x, y, w, h, pad = 6) {
+    if (this.canPlace(x, y, w, h, pad)) {
+      this.boxes.push({ x1: x - pad, y1: y - pad, x2: x + w + pad, y2: y + h + pad });
+      return true;
+    }
+    return false;
+  }
+}
+
+class CanvasRenderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d', { alpha: true });
+    
+    this.width = 1920;
+    this.height = 1080;
+    
+    // Animation Modes:
+    // 'hud'        (Mode 1: Transparent Telemetry HUD)
+    // 'flyover'    (Mode 2: Moving Camera Flyover on Map)
+    // 'fullscreen' (Mode 3: Whole Trip Route Showcase Overview)
+    // 'spotlight'  (Mode 4: Predefined Location Spotlight Zoom)
+    this.animationMode = 'hud';
+    
+    // Map Styles:
+    // 'panorama'   (Style A: Mapy.com High-Res 16:9 Panorama)
+    // 'vector'     (Style B: Minimalist Transparent "GTA Radar" Vector Map)
+    this.mapStyle = 'panorama';
+    this.vectorLayers = null;
+    this.vectorLod = 'auto'; // 'auto', 'macro', 'regional', 'city'
+    
+    // Loaded Data
+    this.gpxData = null;
+    this.mapImage = null;
+    this.mapLoaded = false;
+    this.mapMetadata = null;
+    this.rivers = [];
+    this.landmarks = [];
+    
+    // Timeline & Progress State
+    this.progress = 0.0; // 0.0 to 1.0
+    this.trimIn = 0.0;
+    this.trimOut = 1.0;
+    this.elapsedTimeSec = 0.0;
+    this.totalDurationSec = 10.0;
+    
+    // Independent Color Styling (DaVinci Slate & Neon Accents)
+    this.colors = {
+      path: '#00f0ff',           // Primary active route (Electric Cyan)
+      trail: 'rgba(255,255,255,0.22)', // Unreached route line
+      elevation: '#ffb703',      // Elevation plot line & gradient fill (Amber Gold)
+      elevationFillAlpha: 0.45,
+      text: '#f0f6fc',           // Main typography & telemetry values
+      textDim: 'rgba(240,246,252,0.6)',
+      cardBg: 'rgba(15, 18, 24, 0.88)',
+      cardBorder: 'rgba(255, 255, 255, 0.12)',
+      river: '#00a8ff',          // Vltava and major rivers (Vibrant Blue)
+      startMarker: '#10b981',    // Start badge color (Emerald Green)
+      finishMarker: '#00f0ff',   // Finish badge color (Cyan)
+      glowIntensity: 2           // 0: Off, 1: Low, 2: Med, 3: Neon Ultra
+    };
+    
+    // Line & Beacon Sizes
+    this.lineWidth = 5;
+    this.dotSize = 8;
+    this.hudScale = 1.0;
+    
+    // Marker Style for Start & Finish (Pill, Pin, Ring — no target crosshairs!)
+    this.markerStyle = 'pill'; // 'pill' (Glass Badge), 'pin' (Teardrop), 'ring' (Neon Circle)
+    this.startCityName = 'Praha';
+    this.finishCityName = 'České Budějovice';
+    
+    // Element Visibility Toggles
+    this.toggles = {
+      miniMap: true,
+      elevation: true,
+      telemetry: true,
+      waypoints: true,
+      riderDot: true,
+      bgMap: true,
+      rivers: true,
+      landmarks: true,
+      clock: false
+    };
+    
+    // Telemetry 3-Slot Modular Configuration (Default Czech)
+    this.telemetry = {
+      slot1: { type: 'dist', label: 'VZDÁLENOST' },
+      slot2: { type: 'ele', label: 'NADMOŘSKÁ VÝŠKA' },
+      slot3: { type: 'time', label: 'ČAS JÍZDY' }
+    };
+    
+    // On-Canvas Drag & Scale Layout
+    this.hudLayout = {
+      telemetry: { x: 40, y: 40, w: 380, h: 92, scale: 1.0, visible: true },
+      elevation: { x: 40, y: 880, w: 1200, h: 160, scale: 1.0, visible: true },
+      minimap:   { x: 1460, y: 640, w: 420, h: 400, scale: 1.0, visible: true },
+      clock:     { x: 840, y: 40, w: 240, h: 64, scale: 1.0, visible: false },
+      banner:    { x: 600, y: 40, w: 720, h: 56, scale: 1.0, visible: true }
+    };
+    
+    // Selection & Gizmo State
+    this.selectedElement = null; // 'telemetry' | 'elevation' | 'minimap' | 'clock' | null
+    this.hoveredElement = null;
+    this.isDragging = false;
+    this.isScaling = false;
+    this.dragStart = { x: 0, y: 0 };
+    this.initialBounds = null;
+    
+    // Animated Clock Widget Settings
+    this.clockConfig = {
+      style: 'digital', // 'digital', 'analog_digital', 'broadcast'
+      startTime: '08:30',
+      finishTime: '15:45'
+    };
+    
+    // Virtual Camera (Flyover & Spotlight)
+    this.camZoom = 2.2;
+    this.camDamping = 0.10;
+    this.followHeading = false;
+    this.camX = 0;
+    this.camY = 0;
+    this.camHeading = 0;
+    
+    // Spotlight Mode Settings
+    this.spotlight = {
+      targetLat: 49.414,
+      targetLon: 14.660,
+      targetName: 'Tábor (Hrad Kotnov)',
+      zoomLevel: 3.5,
+      showRoute: true
+    };
+    
+    // 2-Point Calibration state
+    this.calibration = {
+      isCalibrating: false,
+      step: 0,
+      startPixel: { x: 234, y: 468 },
+      endPixel: { x: 344, y: 2718 },
+      scaleNudge: 1.0,
+      rotNudge: 0.0,
+      offsetX: 0,
+      offsetY: 0,
+      matrix: null
+    };
+
+    this.waypoints = [];
+    this.pulsePhase = 0;
+    this.collisionResolver = new LabelCollisionResolver();
+  }
+
+  setResolution(width, height) {
+    this.width = width;
+    this.height = height;
+    this.canvas.width = width;
+    this.canvas.height = height;
+  }
+
+  setGPXData(data) {
+    this.gpxData = data;
+    this.waypoints = data.suggested_waypoints ? [...data.suggested_waypoints] : [];
+
+    if (data.name) {
+      if (data.name.includes(' do ')) {
+        const parts = data.name.replace('Trasa z ', '').split(' do ');
+        this.startCityName = parts[0].trim();
+        this.finishCityName = parts[1].trim();
+      } else if (data.name.includes(' - ')) {
+        const parts = data.name.split(' - ');
+        this.startCityName = parts[0].trim();
+        this.finishCityName = parts[1].trim();
+      }
+    }
+    this.computeCalibrationMatrix();
+  }
+
+  setMapImage(img, metadata = null) {
+    this.mapImage = img;
+    this.mapLoaded = true;
+    if (metadata) {
+      this.mapMetadata = metadata;
+      if (metadata.calib_start && metadata.calib_end) {
+        this.calibration.startPixel = { ...metadata.calib_start };
+        this.calibration.endPixel = { ...metadata.calib_end };
+        this.calibration.scaleNudge = 1.0;
+        this.calibration.rotNudge = 0.0;
+        this.calibration.offsetX = 0;
+        this.calibration.offsetY = 0;
+      }
+    }
+    this.computeCalibrationMatrix();
+  }
+
+  setVectorLayers(layers) {
+    this.vectorLayers = layers;
+  }
+
+  setRivers(rivers) {
+    this.rivers = rivers || [];
+  }
+
+  setLandmarks(landmarks) {
+    this.landmarks = landmarks || [];
+  }
+
+  // 2-Point Affine Similarity Calibration Math
+  computeCalibrationMatrix() {
+    if (!this.gpxData || !this.gpxData.points || this.gpxData.points.length < 2) return;
+    
+    const startPt = this.gpxData.points[0];
+    const endPt = this.gpxData.points[this.gpxData.points.length - 1];
+
+    const gpxX0 = startPt.merc_x;
+    const gpxY0 = startPt.merc_y;
+    const gpxX1 = endPt.merc_x;
+    const gpxY1 = endPt.merc_y;
+
+    const dGpxX = gpxX1 - gpxX0;
+    const dGpxY = gpxY1 - gpxY0;
+    const gpxDist = Math.hypot(dGpxX, dGpxY);
+    const gpxAngle = Math.atan2(dGpxY, dGpxX);
+
+    const pixX0 = this.calibration.startPixel.x;
+    const pixY0 = this.calibration.startPixel.y;
+    const pixX1 = this.calibration.endPixel.x;
+    const pixY1 = this.calibration.endPixel.y;
+
+    const dPixX = pixX1 - pixX0;
+    const dPixY = pixY1 - pixY0;
+    const pixDist = Math.hypot(dPixX, dPixY);
+    const pixAngle = Math.atan2(dPixY, dPixX);
+
+    const baseScale = gpxDist > 0 ? (pixDist / gpxDist) : 1.0;
+    const scale = baseScale * this.calibration.scaleNudge;
+    const rotation = (pixAngle - gpxAngle) + (this.calibration.rotNudge * Math.PI / 180.0);
+
+    this.calibration.matrix = {
+      gpxX0, gpxY0,
+      pixX0: pixX0 + this.calibration.offsetX,
+      pixY0: pixY0 + this.calibration.offsetY,
+      scale,
+      rotation,
+      cosR: Math.cos(rotation),
+      sinR: Math.sin(rotation)
+    };
+  }
+
+  gpxToMapPixels(merc_x, merc_y) {
+    if (!this.calibration.matrix) return { x: 0, y: 0 };
+    const m = this.calibration.matrix;
+    const dx = merc_x - m.gpxX0;
+    const dy = merc_y - m.gpxY0;
+
+    const rx = m.scale * (dx * m.cosR - dy * m.sinR);
+    const ry = m.scale * (dx * m.sinR + dy * m.cosR);
+
+    return {
+      x: m.pixX0 + rx,
+      y: m.pixY0 + ry
+    };
+  }
+
+  latLonToMercator(lat, lon) {
+    const x = (lon + 180.0) / 360.0;
+    const latRad = Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI / 180.0;
+    const y = (1.0 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2.0;
+    return { x, y };
+  }
+
+  // MAIN 60FPS RENDER LOOP
+  render(deltaTime = 0.016) {
+    this.pulsePhase += deltaTime * 3.5;
+    this.collisionResolver.reset();
+
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.width, this.height);
+
+    if (!this.gpxData || !this.gpxData.points || this.gpxData.points.length === 0) {
+      this.drawPlaceholder("Trasa není načtena. Přetáhněte soubor .GPX do okna.");
+      return;
+    }
+
+    const effectiveProgress = Math.max(this.trimIn, Math.min(this.trimOut, this.progress));
+    const points = this.gpxData.points;
+    const totalPts = points.length;
+    const exactIndex = effectiveProgress * (totalPts - 1);
+    const idx0 = Math.floor(exactIndex);
+    const idx1 = Math.min(totalPts - 1, idx0 + 1);
+    const interp = exactIndex - idx0;
+
+    const p0 = points[idx0];
+    const p1 = points[idx1];
+
+    const currentDist = p0.dist_km + (p1.dist_km - p0.dist_km) * interp;
+    const currentEle = p0.ele + (p1.ele - p0.ele) * interp;
+    const currentGrade = p0.grade + (p1.grade - p0.grade) * interp;
+    const currentMercX = p0.merc_x + (p1.merc_x - p0.merc_x) * interp;
+    const currentMercY = p0.merc_y + (p1.merc_y - p0.merc_y) * interp;
+
+    // Switch between the 4 Animation Modes
+    switch (this.animationMode) {
+      case 'hud':
+        this.renderModeHUD(idx0, interp, currentMercX, currentMercY, effectiveProgress, currentDist, currentEle, currentGrade);
+        break;
+      case 'flyover':
+        this.renderModeFlyover(idx0, interp, currentMercX, currentMercY, p0, p1, effectiveProgress, currentDist, currentEle, currentGrade);
+        break;
+      case 'fullscreen':
+        this.renderModeFullscreenRoute(idx0, interp, currentMercX, currentMercY, effectiveProgress, currentDist, currentEle);
+        break;
+      case 'spotlight':
+        this.renderModeSpotlight(effectiveProgress);
+        break;
+      default:
+        this.renderModeHUD(idx0, interp, currentMercX, currentMercY, effectiveProgress, currentDist, currentEle, currentGrade);
+    }
+
+    // Render on-canvas gizmo handles & title safe guide if an element is selected
+    if (this.selectedElement || this.isDragging) {
+      this.drawSafeZoneGuides(ctx);
+      this.drawGizmoHandles(ctx);
+    }
+  }
+
+  // --- MODE 1: TELEMETRY HUD (ALPHA OVERLAY) ---
+  renderModeHUD(idx0, interp, curMercX, curMercY, progress, dist, ele, grade) {
+    if (this.toggles.miniMap) {
+      this.drawCornerMiniMap(idx0, interp, curMercX, curMercY);
+    }
+    if (this.toggles.elevation) {
+      this.drawElevationProfile(progress, dist, ele, grade);
+    }
+    if (this.toggles.telemetry) {
+      this.drawTelemetryStats(dist, ele, grade);
+    }
+    if (this.toggles.clock) {
+      this.drawClockWidget(progress);
+    }
+    if (this.toggles.waypoints) {
+      this.drawActiveWaypointCallout(progress);
+    }
+  }
+
+  // --- MODE 2: MOVING CAMERA FLYOVER ---
+  renderModeFlyover(idx0, interp, curMercX, curMercY, p0, p1, progress, dist, ele, grade) {
+    this.drawMapFlyover(idx0, interp, curMercX, curMercY, p0, p1);
+    if (this.toggles.elevation) {
+      this.drawElevationProfile(progress, dist, ele, grade);
+    }
+    if (this.toggles.telemetry) {
+      this.drawTelemetryStats(dist, ele, grade);
+    }
+    if (this.toggles.clock) {
+      this.drawClockWidget(progress);
+    }
+    if (this.toggles.waypoints) {
+      this.drawActiveWaypointCallout(progress);
+    }
+  }
+
+  // --- MODE 3: WHOLE TRIP ROUTE SHOWCASE OVERVIEW ---
+  renderModeFullscreenRoute(idx0, interp, curMercX, curMercY, progress, dist, ele) {
+    const ctx = this.ctx;
+    const w = this.width;
+    const h = this.height;
+    const s = this.hudScale;
+
+    ctx.save();
+
+    // 1. Background Map (Style A Panorama or Style B GTA Vector)
+    if (this.toggles.bgMap) {
+      if (this.mapStyle === 'vector' && this.vectorLayers) {
+        // Render GTA Radar Vector Map
+        this.renderVectorMapCorridor(ctx, w, h);
+      } else if (this.mapLoaded && this.mapImage) {
+        // Full bleed 16:9 Mapy.com Panorama
+        const scaleX = w / this.mapImage.width;
+        const scaleY = h / this.mapImage.height;
+        const fitScale = Math.max(scaleX, scaleY);
+        const drawW = this.mapImage.width * fitScale;
+        const drawH = this.mapImage.height * fitScale;
+        ctx.drawImage(this.mapImage, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+        ctx.fillStyle = 'rgba(10, 14, 20, 0.40)';
+        ctx.fillRect(0, 0, w, h);
+      }
+    }
+
+    // 2. Fullscreen Bounding Box & Route Framing
+    const b = this.gpxData.bounds;
+    const spanX = (b.max_mx - b.min_mx) || 0.001;
+    const spanY = (b.max_my - b.min_my) || 0.001;
+
+    const marginX = w * 0.16;
+    const marginY = h * 0.16;
+    const usableW = w - marginX * 2;
+    const usableH = h - marginY * 2;
+
+    const routeScale = Math.min(usableW / spanX, usableH / spanY);
+    const offsetX = marginX + (usableW - spanX * routeScale) / 2;
+    const offsetY = marginY + (usableH - spanY * routeScale) / 2;
+
+    const toScreen = (mx, my) => ({
+      x: offsetX + (mx - b.min_mx) * routeScale,
+      y: offsetY + (my - b.min_my) * routeScale
+    });
+
+    // 3. Draw Water / Rivers (Vltava, Sázava etc.) strictly in background
+    if (this.toggles.rivers && this.rivers && this.rivers.length > 0) {
+      this.drawRiversVector(ctx, toScreen);
+    }
+
+    // 4. Full Route Underlay (Muted Trail)
+    const points = this.gpxData.points;
+    const n = points.length;
+
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const pt = toScreen(points[i].merc_x, points[i].merc_y);
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.strokeStyle = this.colors.trail;
+    ctx.lineWidth = Math.max(3, this.lineWidth * 0.8 * s);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // 5. Active Animated Trace Line
+    ctx.save();
+    if (this.colors.glowIntensity > 0) {
+      ctx.shadowColor = this.colors.path;
+      ctx.shadowBlur = this.colors.glowIntensity * 10 * s;
+    }
+    ctx.beginPath();
+    const startIdx = Math.floor(this.trimIn * (n - 1));
+    for (let i = startIdx; i <= idx0; i++) {
+      const pt = toScreen(points[i].merc_x, points[i].merc_y);
+      if (i === startIdx) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    const currentTip = toScreen(curMercX, curMercY);
+    ctx.lineTo(currentTip.x, currentTip.y);
+
+    ctx.strokeStyle = this.colors.path;
+    ctx.lineWidth = Math.max(4, this.lineWidth * 1.2 * s);
+    ctx.stroke();
+    ctx.restore();
+
+    // 6. Start Marker: Stop pulse as soon as rider departs!
+    const startPt = toScreen(points[0].merc_x, points[0].merc_y);
+    const isAtStart = progress <= 0.02; // Stop pulse once rider leaves start
+    this.drawStartFinishMarker(ctx, startPt.x, startPt.y, `START • ${this.startCityName}`, this.colors.startMarker, isAtStart);
+
+    // 7. Finish Marker: Pulse begins upon arrival at destination!
+    const finishPt = toScreen(points[n - 1].merc_x, points[n - 1].merc_y);
+    const isFinished = progress >= 0.98;
+    this.drawStartFinishMarker(ctx, finishPt.x, finishPt.y, `CÍL • ${this.finishCityName}`, this.colors.finishMarker, isFinished);
+
+    // 8. En-Route Milestone Badges with Collision Avoidance
+    if (this.toggles.landmarks && this.landmarks) {
+      for (const lm of this.landmarks) {
+        const mxmy = this.latLonToMercator(lm.lat, lm.lon);
+        if (mxmy.x >= b.min_mx && mxmy.x <= b.max_mx && mxmy.y >= b.min_my && mxmy.y <= b.max_my) {
+          const lPt = toScreen(mxmy.x, mxmy.y);
+          this.drawLandmarkLabel(ctx, lPt.x, lPt.y, lm.name, lm.category, s);
+        }
+      }
+    }
+
+    // 9. Moving Rider Beacon
+    if (this.toggles.riderDot) {
+      this.drawPulsingRiderDot(ctx, currentTip.x, currentTip.y, s);
+    }
+
+    // 10. Route Header Banner
+    if (this.hudLayout.banner.visible) {
+      this.drawFullscreenBanner(ctx, w, h, s, dist, points[n - 1].dist_km);
+    }
+
+    ctx.restore();
+  }
+
+  // --- MODE 4: LOCATION SPOTLIGHT / ZOOM-IN ---
+  renderModeSpotlight(progress) {
+    const ctx = this.ctx;
+    const w = this.width;
+    const h = this.height;
+    const s = this.hudScale;
+
+    ctx.save();
+
+    const t = Math.max(0, Math.min(1, progress));
+    const smoothT = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    const currentZoom = 1.0 + (this.spotlight.zoomLevel - 1.0) * smoothT;
+
+    const targetMerc = this.latLonToMercator(this.spotlight.targetLat, this.spotlight.targetLon);
+    const targetPix = this.gpxToMapPixels(targetMerc.x, targetMerc.y);
+
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(currentZoom, currentZoom);
+    ctx.translate(-targetPix.x, -targetPix.y);
+
+    if (this.toggles.bgMap) {
+      if (this.mapStyle === 'vector' && this.vectorLayers) {
+        this.renderVectorMapCorridor(ctx, w, h);
+      } else if (this.mapLoaded && this.mapImage) {
+        ctx.drawImage(this.mapImage, 0, 0);
+      }
+    }
+
+    if (this.spotlight.showRoute && this.gpxData && this.gpxData.points) {
+      const points = this.gpxData.points;
+      ctx.beginPath();
+      for (let i = 0; i < points.length; i++) {
+        const pix = this.gpxToMapPixels(points[i].merc_x, points[i].merc_y);
+        if (i === 0) ctx.moveTo(pix.x, pix.y);
+        else ctx.lineTo(pix.x, pix.y);
+      }
+      ctx.strokeStyle = this.colors.path;
+      ctx.lineWidth = this.lineWidth / currentZoom;
+      ctx.stroke();
+    }
+
+    // Pulsing Beacon on Spotlight Center
+    this.drawPulsingRiderDot(ctx, targetPix.x, targetPix.y, 1.0 / currentZoom);
+
+    ctx.restore();
+
+    // Spotlight Title Card
+    const cardW = 340 * s;
+    const cardH = 64 * s;
+    const cardX = (w - cardW) / 2;
+    const cardY = 50 * s;
+
+    ctx.fillStyle = this.colors.cardBg;
+    ctx.strokeStyle = this.colors.path;
+    ctx.lineWidth = 1.5 * s;
+    this.roundRect(ctx, cardX, cardY, cardW, cardH, 12 * s);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `800 ${14 * s}px Inter, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`🔍 ${this.spotlight.targetName}`, cardX + cardW / 2, cardY + 28 * s);
+
+    ctx.fillStyle = this.colors.textDim;
+    ctx.font = `600 ${10.5 * s}px JetBrains Mono`;
+    ctx.fillText(`${this.spotlight.targetLat.toFixed(3)}°N, ${this.spotlight.targetLon.toFixed(3)}°E • Zoom ${currentZoom.toFixed(1)}x`, cardX + cardW / 2, cardY + 48 * s);
+  }
+
+  // --- STYLE B: GTA RADAR VECTOR MAP RENDERER ---
+  renderVectorMapCorridor(ctx, w, h) {
+    if (!this.vectorLayers) return;
+    const layers = this.vectorLayers;
+    const b = this.gpxData.bounds;
+    const s = this.hudScale;
+
+    const spanX = (b.max_mx - b.min_mx) || 0.001;
+    const spanY = (b.max_my - b.min_my) || 0.001;
+    const marginX = w * 0.16;
+    const marginY = h * 0.16;
+    const usableW = w - marginX * 2;
+    const usableH = h - marginY * 2;
+    const routeScale = Math.min(usableW / spanX, usableH / spanY);
+    const offsetX = marginX + (usableW - spanX * routeScale) / 2;
+    const offsetY = marginY + (usableH - spanY * routeScale) / 2;
+
+    const toScreen = (mx, my) => ({
+      x: offsetX + (mx - b.min_mx) * routeScale,
+      y: offsetY + (my - b.min_my) * routeScale
+    });
+
+    // 1. Urban Footprint Polygons
+    if (layers.urban_areas) {
+      ctx.fillStyle = 'rgba(30, 38, 52, 0.45)';
+      ctx.strokeStyle = 'rgba(60, 75, 100, 0.55)';
+      ctx.lineWidth = 1;
+      for (const ua of layers.urban_areas) {
+        if (!ua.points || ua.points.length < 3) continue;
+        ctx.beginPath();
+        for (let i = 0; i < ua.points.length; i++) {
+          const pt = toScreen(ua.points[i].mx, ua.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // 2. Railways (Dashed Line)
+    if (layers.railways) {
+      ctx.strokeStyle = 'rgba(200, 210, 225, 0.35)';
+      ctx.lineWidth = 2 * s;
+      ctx.setLineDash([6 * s, 6 * s]);
+      for (const rw of layers.railways) {
+        if (!rw.points || rw.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < rw.points.length; i++) {
+          const pt = toScreen(rw.points[i].mx, rw.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+
+    // 3. Primary & Secondary Roads
+    if (layers.primary_roads) {
+      ctx.strokeStyle = 'rgba(120, 140, 170, 0.40)';
+      ctx.lineWidth = 2.5 * s;
+      for (const pr of layers.primary_roads) {
+        if (!pr.points || pr.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < pr.points.length; i++) {
+          const pt = toScreen(pr.points[i].mx, pr.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 4. Motorways (GTA Dual-Casing)
+    if (layers.motorways) {
+      // Outer casing
+      ctx.strokeStyle = 'rgba(240, 246, 252, 0.70)';
+      ctx.lineWidth = 6 * s;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const mw of layers.motorways) {
+        if (!mw.points || mw.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < mw.points.length; i++) {
+          const pt = toScreen(mw.points[i].mx, mw.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+      // Inner core
+      ctx.strokeStyle = '#1e2533';
+      ctx.lineWidth = 3 * s;
+      for (const mw of layers.motorways) {
+        if (!mw.points || mw.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < mw.points.length; i++) {
+          const pt = toScreen(mw.points[i].mx, mw.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 5. Waterways (Catmull-Rom rivers)
+    if (layers.rivers) {
+      ctx.strokeStyle = this.colors.river;
+      for (const riv of layers.rivers) {
+        if (!riv.points || riv.points.length < 2) continue;
+        ctx.lineWidth = (riv.rank === 1 ? 5 : 3) * s;
+        ctx.beginPath();
+        for (let i = 0; i < riv.points.length; i++) {
+          const pt = toScreen(riv.points[i].mx, riv.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 6. Ranked Places with Collision Avoidance
+    if (layers.places) {
+      ctx.font = `600 ${10.5 * s}px Inter, sans-serif`;
+      ctx.textAlign = 'left';
+      for (const pl of layers.places) {
+        const pt = toScreen(pl.mx, pl.my);
+        if (pt.x < 10 || pt.x > w - 10 || pt.y < 10 || pt.y > h - 10) continue;
+
+        const label = pl.name;
+        const textW = ctx.measureText(label).width;
+        if (this.collisionResolver.place(pt.x + 6 * s, pt.y - 10 * s, textW, 14 * s)) {
+          ctx.fillStyle = pl.rank === 1 ? '#ffffff' : (pl.rank === 2 ? '#e2e8f0' : 'rgba(203, 213, 225, 0.8)');
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, (pl.rank === 1 ? 4 : 2.5) * s, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillText(label, pt.x + 6 * s, pt.y + 4 * s);
+        }
+      }
+    }
+  }
+
+  // --- START & FINISH MARKERS (NO TARGET CROSSHAIRS) ---
+  drawStartFinishMarker(ctx, x, y, label, colorHex, isPulsing = false) {
+    const s = this.hudScale;
+
+    ctx.save();
+
+    // Opening or Arrival Pulse Halo
+    if (isPulsing) {
+      const p1 = (this.pulsePhase % 2.0) / 2.0;
+      const p2 = ((this.pulsePhase + 1.0) % 2.0) / 2.0;
+      ctx.strokeStyle = this.hexToRgba(colorHex, (1.0 - p1) * 0.9);
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath();
+      ctx.arc(x, y, (12 + p1 * 26) * s, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = this.hexToRgba(colorHex, (1.0 - p2) * 0.9);
+      ctx.beginPath();
+      ctx.arc(x, y, (12 + p2 * 26) * s, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    if (this.markerStyle === 'pill') {
+      // Sleek Glass Pill Badge
+      ctx.font = `800 ${11 * s}px Inter, sans-serif`;
+      const textW = ctx.measureText(label).width;
+      const pillW = textW + 28 * s;
+      const pillH = 26 * s;
+      const pillX = x - pillW / 2;
+      const pillY = y - pillH - 12 * s;
+
+      // Smart collision placement
+      this.collisionResolver.place(pillX, pillY, pillW, pillH);
+
+      // Glass Background
+      ctx.fillStyle = 'rgba(15, 18, 24, 0.92)';
+      ctx.strokeStyle = colorHex;
+      ctx.lineWidth = 1.5 * s;
+      this.roundRect(ctx, pillX, pillY, pillW, pillH, 13 * s);
+      ctx.fill();
+      ctx.stroke();
+
+      // Colored Indicator Dot
+      ctx.fillStyle = colorHex;
+      ctx.beginPath();
+      ctx.arc(pillX + 13 * s, pillY + pillH / 2, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Label Text
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.fillText(label, pillX + 22 * s, pillY + 17 * s);
+
+      // Center Pin Dot
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, 4.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = colorHex;
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (this.markerStyle === 'pin') {
+      // Classic Modern Teardrop Pin
+      const pinH = 34 * s;
+      ctx.fillStyle = colorHex;
+      ctx.beginPath();
+      ctx.arc(x, y - pinH + 12 * s, 12 * s, Math.PI, 0, false);
+      ctx.lineTo(x, y);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y - pinH + 12 * s, 5 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Floating label
+      ctx.fillStyle = 'rgba(15, 18, 24, 0.90)';
+      ctx.font = `700 ${10.5 * s}px Inter, sans-serif`;
+      const tW = ctx.measureText(label).width;
+      this.roundRect(ctx, x - tW / 2 - 8 * s, y - pinH - 22 * s, tW + 16 * s, 20 * s, 4 * s);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, x, y - pinH - 8 * s);
+    } else {
+      // Glowing Neon Ring
+      ctx.strokeStyle = colorHex;
+      ctx.lineWidth = 3 * s;
+      ctx.beginPath();
+      ctx.arc(x, y, 9 * s, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, 4 * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  // --- RIVERS VECTOR LAYER ---
+  drawRiversVector(ctx, toScreenFunc) {
+    const s = this.hudScale;
+    ctx.save();
+    ctx.strokeStyle = this.colors.river;
+    ctx.lineWidth = Math.max(3, 4 * s);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (const river of this.rivers) {
+      if (!river.coordinates || river.coordinates.length < 2) continue;
+      ctx.beginPath();
+      for (let i = 0; i < river.coordinates.length; i++) {
+        const c = river.coordinates[i];
+        const pt = toScreenFunc(c.mx, c.my);
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.stroke();
+
+      // River Name Label with Collision Avoidance
+      const midIdx = Math.floor(river.coordinates.length * 0.45);
+      const midPt = toScreenFunc(river.coordinates[midIdx].mx, river.coordinates[midIdx].my);
+      const rLabel = `〰️ ${river.name}`;
+      ctx.font = `600 ${11 * s}px Inter, sans-serif`;
+      const rw = ctx.measureText(rLabel).width;
+      if (this.collisionResolver.place(midPt.x + 8 * s, midPt.y - 14 * s, rw, 16 * s)) {
+        ctx.fillStyle = this.colors.river;
+        ctx.textAlign = 'left';
+        ctx.fillText(rLabel, midPt.x + 8 * s, midPt.y - 4 * s);
+      }
+    }
+    ctx.restore();
+  }
+
+  drawLandmarkLabel(ctx, x, y, name, category, s) {
+    ctx.save();
+    ctx.font = `500 ${10.5 * s}px Inter, sans-serif`;
+    const w = ctx.measureText(name).width;
+
+    if (this.collisionResolver.place(x + 6 * s, y - 8 * s, w, 16 * s)) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+      ctx.beginPath();
+      ctx.arc(x, y, 3.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(240, 246, 252, 0.88)';
+      ctx.textAlign = 'left';
+      ctx.fillText(name, x + 7 * s, y + 4 * s);
+    }
+    ctx.restore();
+  }
+
+  drawFullscreenBanner(ctx, w, h, s, curDist, totalDist) {
+    const layout = this.hudLayout.banner;
+    const barW = layout.w * s;
+    const barH = layout.h * s;
+    const barX = layout.x;
+    const barY = layout.y;
+
+    ctx.save();
+    ctx.fillStyle = this.colors.cardBg;
+    ctx.strokeStyle = this.colors.cardBorder;
+    ctx.lineWidth = 1.5 * s;
+    this.roundRect(ctx, barX, barY, barW, barH, 14 * s);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `800 ${15 * s}px Inter, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`${this.startCityName} ➔ ${this.finishCityName}`, barX + 20 * s, barY + 26 * s);
+
+    ctx.fillStyle = this.colors.path;
+    ctx.font = `700 ${11.5 * s}px JetBrains Mono`;
+    ctx.fillText(`${curDist.toFixed(1)} km / ${totalDist.toFixed(1)} km`, barX + 20 * s, barY + 44 * s);
+
+    const pct = totalDist > 0 ? (curDist / totalDist) : 0;
+    ctx.fillStyle = this.colors.path;
+    this.roundRect(ctx, barX + 20 * s, barY + barH - 5 * s, (barW - 40 * s) * pct, 3 * s, 1.5 * s);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // --- CORNER MINI-MAP ---
+  drawCornerMiniMap(riderIdx, interp, curMercX, curMercY) {
+    const ctx = this.ctx;
+    const layout = this.hudLayout.minimap;
+    const s = this.hudScale * layout.scale;
+
+    const boxX = layout.x;
+    const boxY = layout.y;
+    const boxW = layout.w * s;
+    const boxH = layout.h * s;
+
+    ctx.save();
+
+    // Glass Container
+    ctx.fillStyle = this.colors.cardBg;
+    ctx.strokeStyle = this.colors.cardBorder;
+    ctx.lineWidth = 1.5 * s;
+    this.roundRect(ctx, boxX, boxY, boxW, boxH, 16 * s);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.save();
+    this.roundRect(ctx, boxX + 4, boxY + 4, boxW - 8, boxH - 8, 12 * s);
+    ctx.clip();
+
+    const b = this.gpxData.bounds;
+    const spanX = (b.max_mx - b.min_mx) || 0.001;
+    const spanY = (b.max_my - b.min_my) || 0.001;
+
+    const mapInnerPad = 26 * s;
+    const mapDrawW = boxW - mapInnerPad * 2;
+    const mapDrawH = boxH - mapInnerPad * 2;
+
+    const scale = Math.min(mapDrawW / spanX, mapDrawH / spanY);
+    const offsetX = boxX + mapInnerPad + (mapDrawW - spanX * scale) / 2;
+    const offsetY = boxY + mapInnerPad + (mapDrawH - spanY * scale) / 2;
+
+    const toMiniMap = (mx, my) => ({
+      x: offsetX + (mx - b.min_mx) * scale,
+      y: offsetY + (my - b.min_my) * scale
+    });
+
+    // 1. Rivers
+    if (this.toggles.rivers && this.rivers) {
+      ctx.strokeStyle = this.colors.river;
+      ctx.lineWidth = Math.max(2, 2.5 * s);
+      for (const river of this.rivers) {
+        if (!river.coordinates) continue;
+        ctx.beginPath();
+        for (let i = 0; i < river.coordinates.length; i++) {
+          const pt = toMiniMap(river.coordinates[i].mx, river.coordinates[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 2. Full Route Muted Underlay
+    const points = this.gpxData.points;
+    const n = points.length;
+
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const pt = toMiniMap(points[i].merc_x, points[i].merc_y);
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.strokeStyle = this.colors.trail;
+    ctx.lineWidth = Math.max(2.5, 3.5 * s);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // 3. Active Glowing Path
+    ctx.save();
+    if (this.colors.glowIntensity > 0) {
+      ctx.shadowColor = this.colors.path;
+      ctx.shadowBlur = this.colors.glowIntensity * 6 * s + 4;
+    }
+    ctx.beginPath();
+    const startIdx = Math.floor(this.trimIn * (n - 1));
+    for (let i = startIdx; i <= riderIdx; i++) {
+      const pt = toMiniMap(points[i].merc_x, points[i].merc_y);
+      if (i === startIdx) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    const riderScreenPt = toMiniMap(curMercX, curMercY);
+    ctx.lineTo(riderScreenPt.x, riderScreenPt.y);
+
+    ctx.strokeStyle = this.colors.path;
+    ctx.lineWidth = Math.max(3.5, this.lineWidth * 0.9 * s);
+    ctx.stroke();
+    ctx.restore();
+
+    // 4. Pulsing Rider Beacon
+    if (this.toggles.riderDot) {
+      this.drawPulsingRiderDot(ctx, riderScreenPt.x, riderScreenPt.y, s);
+    }
+
+    ctx.restore(); // clip
+
+    // Header label
+    ctx.fillStyle = this.colors.textDim;
+    ctx.font = `700 ${10 * s}px Inter, sans-serif`;
+    ctx.fillText("MINIMAPA TRASY", boxX + 16 * s, boxY + 22 * s);
+
+    ctx.restore();
+  }
+
+  // --- ELEVATION PROFILE GRAPH ---
+  drawElevationProfile(progress, curDist, curEle, curGrade) {
+    const ctx = this.ctx;
+    const layout = this.hudLayout.elevation;
+    const s = this.hudScale * layout.scale;
+
+    const graphX = layout.x;
+    const graphY = layout.y;
+    const graphW = layout.w * s;
+    const graphH = layout.h * s;
+
+    ctx.save();
+
+    // Glass Background
+    ctx.fillStyle = this.colors.cardBg;
+    ctx.strokeStyle = this.colors.cardBorder;
+    ctx.lineWidth = 1.5 * s;
+    this.roundRect(ctx, graphX, graphY, graphW, graphH, 14 * s);
+    ctx.fill();
+    ctx.stroke();
+
+    const padL = 60 * s;
+    const padR = 24 * s;
+    const padT = 24 * s;
+    const padB = 28 * s;
+
+    const plotX = graphX + padL;
+    const plotY = graphY + padT;
+    const plotW = graphW - padL - padR;
+    const plotH = graphH - padT - padB;
+
+    const points = this.gpxData.points;
+    const totalDist = this.gpxData.total_distance_km;
+    const minEle = this.gpxData.min_elevation_m;
+    const maxEle = this.gpxData.max_elevation_m;
+    const eleRange = (maxEle - minEle) || 100;
+
+    const getX = (distVal) => plotX + (distVal / totalDist) * plotW;
+    const getY = (eleVal) => plotY + plotH - ((eleVal - minEle) / eleRange) * plotH;
+
+    // Grid Lines & Labels
+    ctx.fillStyle = this.colors.textDim;
+    ctx.font = `600 ${10 * s}px JetBrains Mono`;
+    ctx.textAlign = 'right';
+
+    for (let i = 0; i <= 3; i++) {
+      const eVal = Math.round(minEle + (eleRange / 3) * i);
+      const ly = getY(eVal);
+      ctx.fillText(`${eVal}m`, plotX - 8 * s, ly + 3 * s);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(plotX, ly);
+      ctx.lineTo(plotX + plotW, ly);
+      ctx.stroke();
+    }
+
+    // Full Elevation Line (Muted)
+    ctx.beginPath();
+    ctx.moveTo(getX(points[0].dist_km), getY(points[0].ele));
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(getX(points[i].dist_km), getY(points[i].ele));
+    }
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.20)';
+    ctx.lineWidth = 2 * s;
+    ctx.stroke();
+
+    // Active Filled Gradient Area
+    const riderPlotX = getX(curDist);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotX, plotY - 10, riderPlotX - plotX, plotH + 30);
+    ctx.clip();
+
+    ctx.beginPath();
+    ctx.moveTo(plotX, plotY + plotH);
+    for (let i = 0; i < points.length; i++) {
+      ctx.lineTo(getX(points[i].dist_km), getY(points[i].ele));
+    }
+    ctx.lineTo(plotX + plotW, plotY + plotH);
+    ctx.closePath();
+
+    const areaGrad = ctx.createLinearGradient(0, plotY, 0, plotY + plotH);
+    areaGrad.addColorStop(0, this.hexToRgba(this.colors.elevation, this.colors.elevationFillAlpha));
+    areaGrad.addColorStop(1, this.hexToRgba(this.colors.elevation, 0.02));
+    ctx.fillStyle = areaGrad;
+    ctx.fill();
+
+    // Active Top Line
+    ctx.beginPath();
+    ctx.moveTo(getX(points[0].dist_km), getY(points[0].ele));
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(getX(points[i].dist_km), getY(points[i].ele));
+    }
+    ctx.strokeStyle = this.colors.elevation;
+    ctx.lineWidth = 2.8 * s;
+    ctx.stroke();
+    ctx.restore();
+
+    // Vertical Cursor Line at Current Position
+    const riderPlotY = getY(curEle);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([4 * s, 4 * s]);
+    ctx.beginPath();
+    ctx.moveTo(riderPlotX, plotY);
+    ctx.lineTo(riderPlotX, plotY + plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Dot on the profile curve
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(riderPlotX, riderPlotY, 5 * s, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Current Elevation Tooltip Badge
+    const badgeW = 96 * s;
+    const badgeH = 24 * s;
+    const badgeX = Math.max(plotX, Math.min(plotX + plotW - badgeW, riderPlotX - badgeW / 2));
+    const badgeY = Math.max(graphY + 6 * s, riderPlotY - badgeH - 10 * s);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.90)';
+    ctx.strokeStyle = this.colors.elevation;
+    ctx.lineWidth = 1.2 * s;
+    this.roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 4 * s);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `700 ${11 * s}px JetBrains Mono`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${Math.round(curEle)} m`, badgeX + badgeW / 2, badgeY + 16 * s);
+
+    ctx.restore();
+  }
+
+  // --- TELEMETRY STATS (TABULAR NUMBERS & ZERO OVERLAP) ---
+  drawTelemetryStats(distKm, eleM, gradePct) {
+    const ctx = this.ctx;
+    const layout = this.hudLayout.telemetry;
+    const s = this.hudScale * layout.scale;
+
+    const cardX = layout.x;
+    const cardY = layout.y;
+    const cardW = layout.w * s;
+    const cardH = layout.h * s;
+
+    ctx.save();
+
+    // Card Glass Background
+    ctx.fillStyle = this.colors.cardBg;
+    ctx.strokeStyle = this.colors.cardBorder;
+    ctx.lineWidth = 1.5 * s;
+    this.roundRect(ctx, cardX, cardY, cardW, cardH, 14 * s);
+    ctx.fill();
+    ctx.stroke();
+
+    // Header label
+    ctx.fillStyle = this.colors.textDim;
+    ctx.font = `700 ${9.5 * s}px Inter, sans-serif`;
+    ctx.fillText("TELEMETRIE JÍZDY", cardX + 18 * s, cardY + 22 * s);
+
+    const colW = (cardW - 36 * s) / 3;
+
+    // Render each slot with guaranteed non-overlapping typography
+    this.drawTelemetrySlot(ctx, cardX + 18 * s, cardY + 36 * s, colW, this.telemetry.slot1, distKm, eleM, gradePct, s);
+    this.drawTelemetrySlot(ctx, cardX + 18 * s + colW, cardY + 36 * s, colW, this.telemetry.slot2, distKm, eleM, gradePct, s);
+    this.drawTelemetrySlot(ctx, cardX + 18 * s + colW * 2, cardY + 36 * s, colW, this.telemetry.slot3, distKm, eleM, gradePct, s);
+
+    ctx.restore();
+  }
+
+  drawTelemetrySlot(ctx, x, y, colW, slotCfg, distKm, eleM, gradePct, s) {
+    // 1. Label
+    ctx.fillStyle = this.colors.textDim;
+    ctx.font = `600 ${9 * s}px Inter, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(slotCfg.label, x, y + 10 * s);
+
+    // 2. Value and Unit computed per slot type
+    let valStr = '';
+    let unitStr = '';
+    let valColor = this.colors.text;
+
+    if (slotCfg.type === 'dist') {
+      valStr = distKm.toFixed(1);
+      unitStr = 'km';
+    } else if (slotCfg.type === 'ele') {
+      valStr = String(Math.round(eleM));
+      unitStr = 'm';
+    } else if (slotCfg.type === 'gain') {
+      const gain = this.gpxData ? this.gpxData.elevation_gain_m : 0;
+      valStr = `+${Math.round(gain * (distKm / (this.gpxData ? this.gpxData.total_distance_km : 1)))}`;
+      unitStr = 'm';
+    } else if (slotCfg.type === 'time') {
+      const speedKmH = 24.0;
+      const hours = distKm / speedKmH;
+      const hInt = Math.floor(hours);
+      const mInt = Math.floor((hours - hInt) * 60);
+      valStr = `${String(hInt).padStart(2, '0')}:${String(mInt).padStart(2, '0')}`;
+      unitStr = 'h';
+    } else if (slotCfg.type === 'speed') {
+      valStr = '26.8';
+      unitStr = 'km/h';
+    } else if (slotCfg.type === 'grade') {
+      valStr = `${gradePct >= 0 ? '+' : ''}${gradePct.toFixed(1)}`;
+      unitStr = '%';
+      valColor = gradePct >= 6.0 ? '#ef4444' : (gradePct >= 3.0 ? '#ffb703' : '#00f0ff');
+    } else {
+      valStr = '00:00';
+      unitStr = '';
+    }
+
+    // 3. Tabular numerals with baseline alignment — GUARANTEED no overlap!
+    ctx.fillStyle = valColor;
+    ctx.font = `800 ${19 * s}px JetBrains Mono`;
+    ctx.fillText(valStr, x, y + 36 * s);
+
+    if (unitStr) {
+      const numWidth = ctx.measureText(valStr).width;
+      ctx.fillStyle = this.colors.path;
+      ctx.font = `700 ${11 * s}px Inter, sans-serif`;
+      ctx.fillText(unitStr, x + numWidth + 7 * s, y + 34 * s);
+    }
+  }
+
+  // --- ANIMATED CLOCK WIDGET ---
+  drawClockWidget(progress) {
+    const ctx = this.ctx;
+    const layout = this.hudLayout.clock;
+    const s = this.hudScale * layout.scale;
+
+    const clockX = layout.x;
+    const clockY = layout.y;
+    const clockW = layout.w * s;
+    const clockH = layout.h * s;
+
+    ctx.save();
+    ctx.fillStyle = this.colors.cardBg;
+    ctx.strokeStyle = this.colors.cardBorder;
+    ctx.lineWidth = 1.5 * s;
+    this.roundRect(ctx, clockX, clockY, clockW, clockH, 12 * s);
+    ctx.fill();
+    ctx.stroke();
+
+    // Interpolate ride time based on progress
+    const [startH, startM] = (this.clockConfig.startTime || '08:30').split(':').map(Number);
+    const [finH, finM] = (this.clockConfig.finishTime || '15:45').split(':').map(Number);
+    const startMins = startH * 60 + startM;
+    const finMins = finH * 60 + finM;
+    const curTotalMins = startMins + (finMins - startMins) * progress;
+    const curH = Math.floor(curTotalMins / 60) % 24;
+    const curM = Math.floor(curTotalMins % 60);
+    const curS = Math.floor((curTotalMins * 60) % 60);
+
+    const timeStr = `${String(curH).padStart(2, '0')}:${String(curM).padStart(2, '0')}:${String(curS).padStart(2, '0')}`;
+
+    ctx.fillStyle = this.colors.textDim;
+    ctx.font = `700 ${9.5 * s}px Inter, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText("🕒 REÁLNÝ ČAS JÍZDY", clockX + 16 * s, clockY + 22 * s);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `800 ${20 * s}px JetBrains Mono`;
+    ctx.fillText(timeStr, clockX + 16 * s, clockY + 48 * s);
+
+    ctx.restore();
+  }
+
+  // --- WAYPOINT CALLOUTS ---
+  drawActiveWaypointCallout(progress) {
+    if (!this.waypoints || this.waypoints.length === 0) return;
+
+    const s = this.hudScale;
+    let activeWp = null;
+    let factor = 0;
+
+    for (const wp of this.waypoints) {
+      const durProgress = wp.duration_progress || 0.04;
+      const diff = progress - wp.progress;
+      if (diff >= -0.01 && diff <= durProgress) {
+        activeWp = wp;
+        const normT = (diff + 0.01) / (durProgress + 0.01);
+        factor = Math.sin(normT * Math.PI);
+        break;
+      }
+    }
+
+    if (!activeWp || factor <= 0.01) return;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1.0, factor * 1.5);
+
+    const slideOffset = (1.0 - factor) * 35 * s;
+    const cardX = 40 * s;
+    const cardY = (145 + slideOffset) * s;
+    const cardW = 390 * s;
+    const cardH = 72 * s;
+
+    // Glass Card
+    ctx.fillStyle = this.colors.cardBg;
+    ctx.strokeStyle = this.colors.finishMarker;
+    ctx.lineWidth = 1.8 * s;
+    this.roundRect(ctx, cardX, cardY, cardW, cardH, 12 * s);
+    ctx.fill();
+    ctx.stroke();
+
+    // Accent Left Glow
+    ctx.fillStyle = this.colors.finishMarker;
+    this.roundRect(ctx, cardX, cardY, 5 * s, cardH, 2.5 * s);
+    ctx.fill();
+
+    // Category Icon
+    const iconMap = { summit: '⛰️', coffee: '☕', flag: '🚩', finish: '🏁', sprint: '⚡', castle: '🏰' };
+    const iconChar = iconMap[activeWp.category || activeWp.icon] || '📍';
+    ctx.font = `${22 * s}px sans-serif`;
+    ctx.fillText(iconChar, cardX + 16 * s, cardY + 44 * s);
+
+    // Title & Subtitle
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `700 ${15 * s}px Inter, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(activeWp.title, cardX + 54 * s, cardY + 32 * s);
+
+    ctx.fillStyle = this.colors.textDim;
+    ctx.font = `500 ${11.5 * s}px Inter, sans-serif`;
+    ctx.fillText(activeWp.subtitle, cardX + 54 * s, cardY + 52 * s);
+
+    ctx.restore();
+  }
+
+  // --- MAP FLYOVER (MODE 2) ---
+  drawMapFlyover(riderIdx, interp, curMercX, curMercY, p0, p1) {
+    const ctx = this.ctx;
+    const w = this.width;
+    const h = this.height;
+
+    const riderPix = this.gpxToMapPixels(curMercX, curMercY);
+
+    if (this.camX === 0 && this.camY === 0) {
+      this.camX = riderPix.x;
+      this.camY = riderPix.y;
+    } else {
+      this.camX += (riderPix.x - this.camX) * this.camDamping;
+      this.camY += (riderPix.y - this.camY) * this.camDamping;
+    }
+
+    let targetHeading = 0;
+    if (this.followHeading) {
+      const pix0 = this.gpxToMapPixels(p0.merc_x, p0.merc_y);
+      const pix1 = this.gpxToMapPixels(p1.merc_x, p1.merc_y);
+      targetHeading = Math.atan2(pix1.y - pix0.y, pix1.x - pix0.x) - Math.PI / 2;
+    }
+    this.camHeading += (targetHeading - this.camHeading) * 0.08;
+
+    ctx.save();
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(this.camZoom, this.camZoom);
+    if (this.followHeading) ctx.rotate(-this.camHeading);
+    ctx.translate(-this.camX, -this.camY);
+
+    // 1. Stitched Map Panorama or Vector Map
+    if (this.toggles.bgMap) {
+      if (this.mapStyle === 'vector' && this.vectorLayers) {
+        this.renderVectorMapCorridor(ctx, w, h);
+      } else if (this.mapLoaded && this.mapImage) {
+        ctx.drawImage(this.mapImage, 0, 0);
+      }
+    }
+
+    // 2. Full Route Path
+    const points = this.gpxData.points;
+    const n = points.length;
+
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const pix = this.gpxToMapPixels(points[i].merc_x, points[i].merc_y);
+      if (i === 0) ctx.moveTo(pix.x, pix.y);
+      else ctx.lineTo(pix.x, pix.y);
+    }
+    ctx.strokeStyle = this.colors.trail;
+    ctx.lineWidth = Math.max(2, this.lineWidth * 0.8);
+    ctx.stroke();
+
+    // 3. Active Glowing Path
+    ctx.save();
+    if (this.colors.glowIntensity > 0) {
+      ctx.shadowColor = this.colors.path;
+      ctx.shadowBlur = this.colors.glowIntensity * 8;
+    }
+    ctx.beginPath();
+    const startIdx = Math.floor(this.trimIn * (n - 1));
+    for (let i = startIdx; i <= riderIdx; i++) {
+      const pix = this.gpxToMapPixels(points[i].merc_x, points[i].merc_y);
+      if (i === startIdx) ctx.moveTo(pix.x, pix.y);
+      else ctx.lineTo(pix.x, pix.y);
+    }
+    ctx.lineTo(riderPix.x, riderPix.y);
+    ctx.strokeStyle = this.colors.path;
+    ctx.lineWidth = this.lineWidth;
+    ctx.stroke();
+    ctx.restore();
+
+    // 4. Start & Finish Badges on Map
+    const startPix = this.gpxToMapPixels(points[0].merc_x, points[0].merc_y);
+    this.drawStartFinishMarker(ctx, startPix.x, startPix.y, `START • ${this.startCityName}`, this.colors.startMarker, this.progress <= 0.02);
+
+    const finishPix = this.gpxToMapPixels(points[n - 1].merc_x, points[n - 1].merc_y);
+    this.drawStartFinishMarker(ctx, finishPix.x, finishPix.y, `CÍL • ${this.finishCityName}`, this.colors.finishMarker, this.progress >= 0.98);
+
+    // 5. Pulsing Rider Beacon on Map
+    if (this.toggles.riderDot) {
+      this.drawPulsingRiderDot(ctx, riderPix.x, riderPix.y, 1.0);
+    }
+
+    ctx.restore();
+  }
+
+  // --- PULSING RIDER DOT ---
+  drawPulsingRiderDot(ctx, x, y, s) {
+    const pulse1 = (this.pulsePhase % 2.0) / 2.0;
+    const pulse2 = ((this.pulsePhase + 1.0) % 2.0) / 2.0;
+
+    ctx.strokeStyle = this.hexToRgba(this.colors.path, 1.0 - pulse1);
+    ctx.lineWidth = 2 * s;
+    ctx.beginPath();
+    ctx.arc(x, y, (6 + pulse1 * 18) * s, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = this.hexToRgba(this.colors.path, 1.0 - pulse2);
+    ctx.beginPath();
+    ctx.arc(x, y, (6 + pulse2 * 18) * s, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = this.colors.path;
+    ctx.shadowBlur = 8 * s;
+    ctx.beginPath();
+    ctx.arc(x, y, this.dotSize * 0.75 * s, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = this.colors.path;
+    ctx.beginPath();
+    ctx.arc(x, y, this.dotSize * 0.45 * s, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- ON-CANVAS SELECTION GIZMO & SAFE ZONES ---
+  drawSafeZoneGuides(ctx) {
+    const w = this.width;
+    const h = this.height;
+
+    ctx.save();
+    ctx.setLineDash([6, 6]);
+
+    // 90% Action Safe
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(w * 0.05, h * 0.05, w * 0.9, h * 0.9);
+
+    // 80% Title Safe
+    ctx.strokeStyle = 'rgba(255, 183, 3, 0.15)';
+    ctx.strokeRect(w * 0.1, h * 0.1, w * 0.8, h * 0.8);
+
+    ctx.restore();
+  }
+
+  drawGizmoHandles(ctx) {
+    if (!this.selectedElement || !this.hudLayout[this.selectedElement]) return;
+    const el = this.hudLayout[this.selectedElement];
+    const s = this.hudScale * el.scale;
+
+    const x = el.x;
+    const y = el.y;
+    const w = el.w * s;
+    const h = el.h * s;
+
+    ctx.save();
+    // Bounding Box
+    ctx.strokeStyle = '#00f0ff';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(x - 4, y - 4, w + 8, h + 8);
+    ctx.setLineDash([]);
+
+    // 4 Corner Handles
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#00f0ff';
+    ctx.lineWidth = 2;
+    const hs = 8;
+    const corners = [
+      { x: x - 4, y: y - 4 },
+      { x: x + w + 4, y: y - 4 },
+      { x: x - 4, y: y + h + 4 },
+      { x: x + w + 4, y: y + h + 4 }
+    ];
+
+    for (const c of corners) {
+      ctx.fillRect(c.x - hs / 2, c.y - hs / 2, hs, hs);
+      ctx.strokeRect(c.x - hs / 2, c.y - hs / 2, hs, hs);
+    }
+
+    ctx.restore();
+  }
+
+  // --- UTILITIES ---
+  roundRect(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  }
+
+  hexToRgba(hex, alpha = 1.0) {
+    if (!hex) return `rgba(255, 255, 255, ${alpha})`;
+    if (hex.startsWith('rgba') || hex.startsWith('rgb')) return hex;
+    const h = hex.replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16) || 0;
+    const g = parseInt(h.substring(2, 4), 16) || 240;
+    const b = parseInt(h.substring(4, 6), 16) || 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  drawPlaceholder(text) {
+    const ctx = this.ctx;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.font = '600 18px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, this.width / 2, this.height / 2);
+  }
+}
+
+// Export for browser
+window.CanvasRenderer = CanvasRenderer;
