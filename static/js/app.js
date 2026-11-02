@@ -630,6 +630,31 @@ document.addEventListener('DOMContentLoaded', () => {
       // Load Assets for this project
       await loadAssets(proj.active_gpx);
 
+      // Restore Project Waypoints and Custom Landmarks (Preserve against suggested GPX defaults)
+      if (s.waypoints && Array.isArray(s.waypoints) && s.waypoints.length > 0) {
+        renderer.waypoints = JSON.parse(JSON.stringify(s.waypoints));
+        updateWaypointsUI();
+        renderTimelineWaypoints();
+      }
+      if (s.landmarks && Array.isArray(s.landmarks)) {
+        renderer.landmarks = JSON.parse(JSON.stringify(s.landmarks));
+      }
+      if (s.disabledFeatures && Array.isArray(s.disabledFeatures)) {
+        renderer.disabledFeatures = new Set(s.disabledFeatures);
+      }
+      if (s.startFinishStyle) {
+        renderer.startFinishStyle = s.startFinishStyle;
+        const sel = document.getElementById('startFinishStyleSelect');
+        if (sel) sel.value = s.startFinishStyle;
+      }
+      if (s.viewportPan) {
+        renderer.viewportPan = { ...s.viewportPan };
+        if (typeof updateMapPanInputs === 'function') updateMapPanInputs();
+      }
+      if (s.viewportZoom) {
+        renderer.viewportZoom = s.viewportZoom;
+      }
+
       // Check Mapy API Key
       loadApiKeyStatus();
 
@@ -1136,18 +1161,41 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       renderer.selectedElement = null;
       activeWidgetKey = null;
-      gizmoDragMode = null;
+      if (renderer.animationMode === 'split' || renderer.animationMode === 'fullscreen') {
+        gizmoDragMode = 'pan_map';
+        gizmoStartMouse = { x: cx, y: cy };
+        gizmoInitialState = {
+          x: (renderer.viewportPan && renderer.viewportPan.x) || 0,
+          y: (renderer.viewportPan && renderer.viewportPan.y) || 0
+        };
+        renderer.isDragging = true;
+        canvas.style.cursor = 'grabbing';
+      } else {
+        gizmoDragMode = null;
+      }
     }
   });
 
   window.addEventListener('mousemove', (e) => {
-    if (!gizmoDragMode || !activeWidgetKey) return;
+    if (!gizmoDragMode) return;
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const cx = (e.clientX - rect.left) * scaleX;
     const cy = (e.clientY - rect.top) * scaleY;
 
+    if (gizmoDragMode === 'pan_map') {
+      const dx = cx - gizmoStartMouse.x;
+      const dy = cy - gizmoStartMouse.y;
+      if (!renderer.viewportPan) renderer.viewportPan = { x: 0, y: 0 };
+      renderer.viewportPan.x = Math.round(gizmoInitialState.x + dx);
+      renderer.viewportPan.y = Math.round(gizmoInitialState.y + dy);
+      updateMapPanInputs();
+      if (!state.isPlaying) renderer.render();
+      return;
+    }
+
+    if (!activeWidgetKey) return;
     const el = renderer.hudLayout[activeWidgetKey];
     if (gizmoDragMode === 'move') {
       const dx = cx - gizmoStartMouse.x;
@@ -1165,9 +1213,81 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   window.addEventListener('mouseup', () => {
+    if (gizmoDragMode === 'pan_map') {
+      saveCurrentProjectSettings();
+      canvas.style.cursor = 'default';
+    }
     gizmoDragMode = null;
     renderer.isDragging = false;
   });
+
+  // Map Pan Controls (Inspector Sliders & Quick Nudge Buttons)
+  const mapPanXSlider = document.getElementById('mapPanXSlider');
+  const mapPanXVal = document.getElementById('mapPanXVal');
+  const mapPanYSlider = document.getElementById('mapPanYSlider');
+  const mapPanYVal = document.getElementById('mapPanYVal');
+  const btnNudgeMapLeft = document.getElementById('btnNudgeMapLeft');
+  const btnResetMapPan = document.getElementById('btnResetMapPan');
+  const btnNudgeMapRight = document.getElementById('btnNudgeMapRight');
+
+  function updateMapPanInputs() {
+    const px = (renderer.viewportPan && renderer.viewportPan.x) || 0;
+    const py = (renderer.viewportPan && renderer.viewportPan.y) || 0;
+    if (mapPanXSlider) mapPanXSlider.value = px;
+    if (mapPanXVal) mapPanXVal.textContent = `${px} px`;
+    if (mapPanYSlider) mapPanYSlider.value = py;
+    if (mapPanYVal) mapPanYVal.textContent = `${py} px`;
+  }
+
+  if (mapPanXSlider) {
+    mapPanXSlider.addEventListener('input', (e) => {
+      if (!renderer.viewportPan) renderer.viewportPan = { x: 0, y: 0 };
+      renderer.viewportPan.x = parseInt(e.target.value) || 0;
+      if (mapPanXVal) mapPanXVal.textContent = `${renderer.viewportPan.x} px`;
+      if (!state.isPlaying) renderer.render();
+      saveCurrentProjectSettings();
+    });
+  }
+
+  if (mapPanYSlider) {
+    mapPanYSlider.addEventListener('input', (e) => {
+      if (!renderer.viewportPan) renderer.viewportPan = { x: 0, y: 0 };
+      renderer.viewportPan.y = parseInt(e.target.value) || 0;
+      if (mapPanYVal) mapPanYVal.textContent = `${renderer.viewportPan.y} px`;
+      if (!state.isPlaying) renderer.render();
+      saveCurrentProjectSettings();
+    });
+  }
+
+  if (btnNudgeMapLeft) {
+    btnNudgeMapLeft.addEventListener('click', () => {
+      if (!renderer.viewportPan) renderer.viewportPan = { x: 0, y: 0 };
+      renderer.viewportPan.x -= 120;
+      updateMapPanInputs();
+      if (!state.isPlaying) renderer.render();
+      saveCurrentProjectSettings();
+    });
+  }
+
+  if (btnNudgeMapRight) {
+    btnNudgeMapRight.addEventListener('click', () => {
+      if (!renderer.viewportPan) renderer.viewportPan = { x: 0, y: 0 };
+      renderer.viewportPan.x += 120;
+      updateMapPanInputs();
+      if (!state.isPlaying) renderer.render();
+      saveCurrentProjectSettings();
+    });
+  }
+
+  if (btnResetMapPan) {
+    btnResetMapPan.addEventListener('click', () => {
+      renderer.viewportPan = { x: 0, y: 0 };
+      updateMapPanInputs();
+      if (!state.isPlaying) renderer.render();
+      saveCurrentProjectSettings();
+      showToast('Pozice mapy vycentrována');
+    });
+  }
 
   // ==================== 5. ASSET & GEODATA LOADING ====================
   async function loadAssets(activeGpx = null, activeMap = null) {
@@ -1654,6 +1774,7 @@ document.addEventListener('DOMContentLoaded', () => {
               hudScale: renderer.hudScale,
               lineWidth: renderer.lineWidth,
               markerStyle: renderer.markerStyle,
+              startFinishStyle: renderer.startFinishStyle,
               startCityName: renderer.startCityName,
               finishCityName: renderer.finishCityName,
               toggles: renderer.toggles,
@@ -1662,7 +1783,12 @@ document.addEventListener('DOMContentLoaded', () => {
               lod: renderer.lod,
               spotlight: renderer.spotlight,
               zoomKeyframes: renderer.zoomKeyframes,
-              backdropOpacity: renderer.backdropOpacity
+              backdropOpacity: renderer.backdropOpacity,
+              viewportPan: renderer.viewportPan,
+              viewportZoom: renderer.viewportZoom,
+              waypoints: renderer.waypoints,
+              landmarks: renderer.landmarks,
+              disabledFeatures: Array.from(renderer.disabledFeatures || [])
             }
           })
         });
@@ -1689,20 +1815,20 @@ document.addEventListener('DOMContentLoaded', () => {
     cyber: {
       name: 'Cyber Cyan',
       path: '#00F0FF',
-      elevation: '#FFB703',
+      elevation: '#94A3B8',
       text: '#FFFFFF',
       river: '#00A8FF',
-      startMarker: '#39FF14',
+      startMarker: '#10B981',
       finishMarker: '#00F0FF'
     },
     forest: {
       name: 'Outdoor Forest',
-      path: '#39FF14',
-      elevation: '#10B981',
+      path: '#22C55E',
+      elevation: '#94A3B8',
       text: '#F0F6FC',
       river: '#0D9488',
       startMarker: '#10B981',
-      finishMarker: '#39FF14'
+      finishMarker: '#22C55E'
     },
     sunset: {
       name: 'Sunset Ridge',
@@ -2450,17 +2576,75 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
 
         row.addEventListener('click', () => {
-          renderer.landmarks.push({
-            name: item.name,
-            category: item.category,
-            lat: item.lat,
-            lon: item.lon
-          });
+          saveStateForUndo('Přidání místa z vyhledávání');
+
+          let nearestDistKm = 0;
+          let nearestProg = 0;
+          if (renderer.gpxData && renderer.gpxData.points && renderer.gpxData.points.length > 0) {
+            let minD = Infinity;
+            const pts = renderer.gpxData.points;
+            for (let i = 0; i < pts.length; i++) {
+              const pt = pts[i];
+              const d = Math.hypot(pt.lat - item.lat, pt.lon - item.lon);
+              if (d < minD) {
+                minD = d;
+                nearestDistKm = pt.dist_km;
+                nearestProg = pt.progress;
+              }
+            }
+          }
+
+          if (!renderer.waypoints) renderer.waypoints = [];
+          if (!renderer.landmarks) renderer.landmarks = [];
+
+          const existingWp = renderer.waypoints.find(w => w.title === item.name);
+          if (existingWp) {
+            existingWp.lat = item.lat;
+            existingWp.lon = item.lon;
+            existingWp.dist_km = Number(nearestDistKm.toFixed(1));
+            existingWp.progress = nearestProg;
+          } else {
+            renderer.waypoints.push({
+              id: 'wp_' + Date.now(),
+              title: item.name,
+              subtitle: item.display_name ? (item.display_name.substring(0, 42) + '...') : `${item.name} • ${nearestDistKm.toFixed(1)} km`,
+              desc: item.display_name || item.name,
+              dist_km: Number(nearestDistKm.toFixed(1)),
+              progress: nearestProg,
+              duration_progress: 0.05,
+              category: item.category || 'flag',
+              lat: item.lat,
+              lon: item.lon,
+              showBanner: true
+            });
+          }
+
+          const existingLm = renderer.landmarks.find(l => l.name === item.name);
+          if (!existingLm) {
+            renderer.landmarks.push({
+              id: 'lm_' + Date.now(),
+              name: item.name,
+              category: item.category,
+              lat: item.lat,
+              lon: item.lon
+            });
+          }
+
           renderer.spotlight.targetLat = item.lat;
           renderer.spotlight.targetLon = item.lon;
           renderer.spotlight.targetName = item.name;
 
-          showToast(`Přidáno na mapu: ${item.name}`);
+          renderer.waypoints.sort((a, b) => (a.dist_km || 0) - (b.dist_km || 0));
+          updateWaypointsUI();
+          renderTimelineWaypoints();
+          saveCurrentProjectSettings();
+          if (!state.isPlaying) renderer.render();
+
+          // Auto-switch to Tab 5 (tabLandmarks) so user sees the active waypoint in the list
+          const lTab = document.querySelector('.inspector-tab[data-tab="tabLandmarks"]');
+          if (lTab) lTab.click();
+
+          showToast(`✓ Přidáno do mapy i seznamu: ${item.name}`);
           landmarkSearchResults.innerHTML = '';
           landmarkSearchInput.value = '';
         });
@@ -2507,7 +2691,11 @@ document.addEventListener('DOMContentLoaded', () => {
       card.querySelector('.waypoint-del-btn').addEventListener('click', (e) => {
         e.stopPropagation();
         saveStateForUndo('Smazání bodu ' + wp.title);
-        renderer.waypoints.splice(idx, 1);
+        const removed = renderer.waypoints.splice(idx, 1)[0];
+        if (removed && renderer.landmarks) {
+          const lIdx = renderer.landmarks.findIndex(l => (removed.id && l.id === removed.id) || l.name === removed.title);
+          if (lIdx !== -1) renderer.landmarks.splice(lIdx, 1);
+        }
         updateWaypointsUI();
         renderTimelineWaypoints();
         saveCurrentProjectSettings();
@@ -2584,10 +2772,21 @@ document.addEventListener('DOMContentLoaded', () => {
       const totalKm = (renderer.gpxData ? renderer.gpxData.total_distance_km : 100) || 1;
       const prog = Math.max(0, Math.min(1, distKm / totalKm));
 
+      // Calculate track coordinates
+      let wpLat = null, wpLon = null;
+      if (renderer.gpxData && renderer.gpxData.points && renderer.gpxData.points.length > 0) {
+        const pts = renderer.gpxData.points;
+        const idx = Math.min(pts.length - 1, Math.max(0, Math.floor(prog * (pts.length - 1))));
+        wpLat = pts[idx].lat;
+        wpLon = pts[idx].lon;
+      }
+
       saveStateForUndo('Přidání bodu zájmu');
 
+      if (!renderer.waypoints) renderer.waypoints = [];
+      const newWpId = 'wp_' + Date.now();
       renderer.waypoints.push({
-        id: 'wp_' + Date.now(),
+        id: newWpId,
         title,
         subtitle,
         desc: subtitle,
@@ -2595,8 +2794,21 @@ document.addEventListener('DOMContentLoaded', () => {
         progress: prog,
         duration_progress: 0.05,
         category: category,
+        lat: wpLat,
+        lon: wpLon,
         showBanner: true
       });
+
+      if (wpLat != null && wpLon != null) {
+        if (!renderer.landmarks) renderer.landmarks = [];
+        renderer.landmarks.push({
+          id: newWpId,
+          name: title,
+          category: category,
+          lat: wpLat,
+          lon: wpLon
+        });
+      }
 
       renderer.waypoints.sort((a, b) => (a.dist_km || 0) - (b.dist_km || 0));
       updateWaypointsUI();
@@ -2604,7 +2816,12 @@ document.addEventListener('DOMContentLoaded', () => {
       saveCurrentProjectSettings();
       if (!state.isPlaying) renderer.render();
       closeAddWaypointModal();
-      showToast(`✓ Bod přidán do mapy: ${title}`);
+
+      // Switch to Tab 5 (tabLandmarks) so user immediately sees the added waypoint in the list
+      const lTab = document.querySelector('.inspector-tab[data-tab="tabLandmarks"]');
+      if (lTab) lTab.click();
+
+      showToast(`✓ Bod přidán do mapy i seznamu: ${title}`);
     });
   }
 

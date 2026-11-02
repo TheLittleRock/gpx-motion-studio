@@ -881,7 +881,7 @@ class CanvasRenderer {
 
     // 7. Paths (Cycle / Pedestrian)
     if (this.lod && this.lod.paths && layers.paths) {
-      ctx.strokeStyle = '#39ff14';
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
       ctx.lineWidth = 1.8 * s;
       ctx.setLineDash([4 * s, 4 * s]);
       for (const pa of layers.paths) {
@@ -1106,8 +1106,15 @@ class CanvasRenderer {
     // 8. Custom Waypoint Callouts & Permanent Route Pins
     if (this.toggles.waypoints && this.waypoints) {
       for (const wp of this.waypoints) {
-        const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.dist_km || 0) / (points[n - 1].dist_km || 1)) * (n - 1))));
-        const wpPt = toScreen(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        if (wp.id && !this.isFeatureVisible(wp.id)) continue;
+        let wpPt;
+        if (wp.lat != null && wp.lon != null) {
+          const mxmy = this.latLonToMercator(wp.lat, wp.lon);
+          wpPt = toScreen(mxmy.x, mxmy.y);
+        } else {
+          const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.progress !== undefined ? wp.progress : ((wp.dist_km || 0) / (points[n - 1].dist_km || 1)))) * (n - 1))));
+          wpPt = toScreen(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        }
         
         // Permanent waypoint pin on the route line
         this.drawWaypointRoutePin(ctx, wpPt.x, wpPt.y, wp, s);
@@ -1195,7 +1202,7 @@ class CanvasRenderer {
     const vZoom = Math.max(0.15, Math.min(5.0, this.viewportZoom || 1.0));
     const currentZoom = Math.max(6, Math.min(18, fitZoom + Math.log2(vZoom)));
 
-    const mapCenterX = w * 0.72;
+    const mapCenterX = w * 0.74;
     const mapCenterY = h * 0.50;
     const panX = (this.viewportPan && this.viewportPan.x) || 0;
     const panY = (this.viewportPan && this.viewportPan.y) || 0;
@@ -1301,8 +1308,15 @@ class CanvasRenderer {
     // 7. Custom Waypoint Pins on route
     if (this.toggles.waypoints && this.waypoints) {
       for (const wp of this.waypoints) {
-        const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.dist_km || 0) / (points[n - 1].dist_km || 1)) * (n - 1))));
-        const wpPt = toScreen(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        if (wp.id && !this.isFeatureVisible(wp.id)) continue;
+        let wpPt;
+        if (wp.lat != null && wp.lon != null) {
+          const mxmy = this.latLonToMercator(wp.lat, wp.lon);
+          wpPt = toScreen(mxmy.x, mxmy.y);
+        } else {
+          const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.progress !== undefined ? wp.progress : ((wp.dist_km || 0) / (points[n - 1].dist_km || 1)))) * (n - 1))));
+          wpPt = toScreen(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        }
         this.drawWaypointRoutePin(ctx, wpPt.x, wpPt.y, wp, s);
       }
     }
@@ -1853,10 +1867,21 @@ class CanvasRenderer {
     };
     const def = defaults[key] || { x: 40, y: 40, w: 300, h: 100, scale: 1.0, visible: true };
     const cur = (this.hudLayout && this.hudLayout[key]) ? this.hudLayout[key] : {};
+    let w = (cur.w && !isNaN(cur.w)) ? Number(cur.w) : def.w;
+    let x = (cur.x !== undefined && !isNaN(cur.x)) ? Number(cur.x) : def.x;
+
+    // In split route mode, adapt elevation profile width so it stays neatly in the left HUD column
+    if (this.animationMode === 'split' && key === 'elevation') {
+      const maxSplitW = Math.round(this.width * 0.40); // e.g. 768px on 1080p
+      if (w > maxSplitW) {
+        w = maxSplitW;
+      }
+    }
+
     return {
-      x: (cur.x !== undefined && !isNaN(cur.x)) ? Number(cur.x) : def.x,
+      x: x,
       y: (cur.y !== undefined && !isNaN(cur.y)) ? Number(cur.y) : def.y,
-      w: (cur.w && !isNaN(cur.w)) ? Number(cur.w) : def.w,
+      w: w,
       h: (cur.h && !isNaN(cur.h)) ? Number(cur.h) : def.h,
       scale: (cur.scale && !isNaN(cur.scale)) ? Number(cur.scale) : def.scale,
       visible: (cur.visible !== undefined) ? Boolean(cur.visible) : def.visible
@@ -2062,8 +2087,14 @@ class CanvasRenderer {
     if (this.toggles.waypoints && this.waypoints) {
       for (const wp of this.waypoints) {
         if (wp.id && !this.isFeatureVisible(wp.id)) continue;
-        const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.dist_km || 0) / (points[n - 1].dist_km || 1)) * (n - 1))));
-        const pt = toMiniMap(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        let pt;
+        if (wp.lat != null && wp.lon != null) {
+          const mxmy = this.latLonToMercator(wp.lat, wp.lon);
+          pt = toMiniMap(mxmy.x, mxmy.y);
+        } else {
+          const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.progress !== undefined ? wp.progress : ((wp.dist_km || 0) / (points[n - 1].dist_km || 1)))) * (n - 1))));
+          pt = toMiniMap(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        }
         if (pt.x < boxX + 6 || pt.x > boxX + boxW - 6 || pt.y < boxY + 32 * s || pt.y > boxY + boxH - 6) continue;
 
         ctx.save();
@@ -2608,6 +2639,24 @@ class CanvasRenderer {
         const lPt = this.mercToScreenTiles(mxmy.x, mxmy.y, this.camMercX, this.camMercY, tileZoom, w, h);
         if (lPt.x >= -60 && lPt.x <= w + 60 && lPt.y >= -40 && lPt.y <= h + 40) {
           this.drawLandmarkLabel(ctx, lPt.x, lPt.y, lm.name, lm.category, s);
+        }
+      }
+    }
+
+    // 6. Custom Waypoints along corridor
+    if (this.toggles.waypoints && this.waypoints) {
+      for (const wp of this.waypoints) {
+        if (wp.id && !this.isFeatureVisible(wp.id)) continue;
+        let lPt;
+        if (wp.lat != null && wp.lon != null) {
+          const mxmy = this.latLonToMercator(wp.lat, wp.lon);
+          lPt = this.mercToScreenTiles(mxmy.x, mxmy.y, this.camMercX, this.camMercY, tileZoom, w, h);
+        } else {
+          const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.progress !== undefined ? wp.progress : ((wp.dist_km || 0) / (points[n - 1].dist_km || 1)))) * (n - 1))));
+          lPt = this.mercToScreenTiles(points[wpIdx].merc_x, points[wpIdx].merc_y, this.camMercX, this.camMercY, tileZoom, w, h);
+        }
+        if (lPt.x >= -60 && lPt.x <= w + 60 && lPt.y >= -40 && lPt.y <= h + 40) {
+          this.drawWaypointRoutePin(ctx, lPt.x, lPt.y, wp, s);
         }
       }
     }

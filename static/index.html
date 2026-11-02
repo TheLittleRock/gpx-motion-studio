@@ -356,16 +356,16 @@
             <div class="form-group" style="margin-bottom:0;">
               <div class="form-label"><span>Výškový profil</span></div>
               <div style="display:flex; align-items:center; gap:8px;">
-                <input type="color" id="colorElevation" value="#FFB703" class="color-picker-input">
-                <span class="form-val" id="colorElevationVal">#FFB703</span>
+                <input type="color" id="colorElevation" value="#94A3B8" class="color-picker-input">
+                <span class="form-val" id="colorElevationVal">#94A3B8</span>
               </div>
               <div class="color-presets" data-target="colorElevation">
+                <div class="color-swatch" style="background:#94A3B8;" title="Slate Gray" data-color="#94A3B8"></div>
+                <div class="color-swatch" style="background:#CBD5E1;" title="Silver Gray" data-color="#CBD5E1"></div>
+                <div class="color-swatch" style="background:#64748B;" title="Cool Charcoal" data-color="#64748B"></div>
+                <div class="color-swatch" style="background:#FFFFFF;" title="Pure White" data-color="#FFFFFF"></div>
                 <div class="color-swatch" style="background:#FFB703;" title="Amber Gold" data-color="#FFB703"></div>
-                <div class="color-swatch" style="background:#10B981;" title="Emerald Green" data-color="#10B981"></div>
                 <div class="color-swatch" style="background:#00F0FF;" title="Sky Blue" data-color="#00F0FF"></div>
-                <div class="color-swatch" style="background:#F97316;" title="Sunset Orange" data-color="#F97316"></div>
-                <div class="color-swatch" style="background:#EF4444;" title="Coral Red" data-color="#EF4444"></div>
-                <div class="color-swatch" style="background:#6366F1;" title="Indigo" data-color="#6366F1"></div>
               </div>
             </div>
 
@@ -714,6 +714,26 @@
           <div class="form-group">
             <div class="form-label"><span>Posun Y (px)</span><span class="form-val" id="calibOffsetYVal">0</span></div>
             <input type="range" class="form-range" id="calibOffsetYSlider" min="-250" max="250" value="0">
+          </div>
+
+          <div class="section-title">Pozice & Posun Mapy (Boční split & Celá trasa)</div>
+          <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:14px;">
+            <div style="font-size:10.5px; color:var(--text-muted); margin-bottom:8px;">
+              Posuňte mapu více ke kraji obrazovky posuvníkem nebo tažením přímo na plátně (Drag & Drop).
+            </div>
+            <div class="form-group" style="margin-bottom:6px;">
+              <div class="form-label"><span>Horizontální posun X</span><span class="form-val" id="mapPanXVal">0 px</span></div>
+              <input type="range" class="form-range" id="mapPanXSlider" min="-1200" max="1200" step="10" value="0">
+            </div>
+            <div class="form-group" style="margin-bottom:8px;">
+              <div class="form-label"><span>Vertikální posun Y</span><span class="form-val" id="mapPanYVal">0 px</span></div>
+              <input type="range" class="form-range" id="mapPanYSlider" min="-800" max="800" step="10" value="0">
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-secondary" id="btnNudgeMapLeft" style="flex:1; justify-content:center; font-size:10.5px;" title="Posunout doleva">⬅️ Více vlevo</button>
+              <button class="btn btn-secondary" id="btnResetMapPan" style="flex:1; justify-content:center; font-size:10.5px;" title="Vrátit mapu na výchozí střed">↺ Na střed</button>
+              <button class="btn btn-secondary" id="btnNudgeMapRight" style="flex:1; justify-content:center; font-size:10.5px;" title="Posunout doprava ke kraji">Více vpravo ➔</button>
+            </div>
           </div>
         </div>
 

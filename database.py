@@ -157,7 +157,7 @@ class ProjectDatabase:
                 "cardBg": "rgba(14, 18, 25, 0.88)",
                 "cardBorder": "rgba(255, 255, 255, 0.12)",
                 "river": "#00a8ff",
-                "startMarker": "#39ff14",
+                "startMarker": "#10b981",
                 "finishMarker": "#00f0ff",
                 "glowIntensity": 2
             },
