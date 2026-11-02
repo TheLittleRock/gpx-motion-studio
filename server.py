@@ -1,13 +1,15 @@
 import os
+import re
 import glob
 import uuid
 import base64
 import subprocess
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response, Query
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response, Query, Body
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -78,6 +80,11 @@ class FinalizeExportRequest(BaseModel):
 class FusionExportRequest(BaseModel):
     points: List[dict]
     fps: int = 30
+
+class ExpandPlacesRequest(BaseModel):
+    project_id: Optional[str] = "default"
+    gpx_filename: Optional[str] = None
+    corridor_km: Optional[float] = 25.0
     duration: float = 10.0
     resolution: str = "1920x1080"
     color: str = "#00F0FF"
@@ -402,8 +409,9 @@ async def delete_api_key():
 
 # ==================== DYNAMIC SLIPPY TILE ENGINE ====================
 @app.get("/api/tiles/{provider}/{z}/{x}/{y}")
-async def get_map_tile(provider: str, z: int, x: int, y: int):
-    """Serves 256x256 map tiles cached on disk for live canvas rendering and 60fps ProRes export."""
+def get_map_tile(provider: str, z: int, x: int, y: int):
+    """Serves 256x256 map tiles cached on disk for live canvas rendering and 60fps ProRes export.
+    Executed synchronously in FastAPI threadpool to avoid blocking the main asyncio event loop."""
     apikey = db.get_app_setting("mapy_api_key", "")
     tile_bytes = tile_service.get_tile(provider, z, x, y, apikey=apikey)
     if not tile_bytes:
@@ -430,6 +438,26 @@ async def prefetch_tiles(req: PrefetchRequest):
     count = tile_service.prefetch_route_tiles(req.provider, req.bounds, req.min_z, req.max_z, apikey)
     return {"status": "success", "prefetched_count": count}
 
+# ==================== PLACE EXPANSION API ====================
+@app.post("/api/places/expand")
+async def expand_places(req: ExpandPlacesRequest):
+    """Dynamically expands village and town catalog in the GPX corridor via Overpass API."""
+    gpx_points = None
+    if req.gpx_filename:
+        safe_name = Path(req.gpx_filename).name
+        target_path = BASE_DIR / safe_name
+        if not target_path.exists():
+            target_path = ASSETS_DIR / safe_name
+        if target_path.exists() and target_path.suffix.lower() == ".gpx":
+            try:
+                gpx_data = gpx_parser.parse_gpx_file(str(target_path))
+                gpx_points = gpx_data.get("points")
+            except Exception as e:
+                print(f"Warning parsing GPX for place expansion: {e}")
+
+    expanded = vector_engine.expand_corridor_places(gpx_points, corridor_km=req.corridor_km or 25.0)
+    return {"status": "success", "count": len(expanded), "places": expanded}
+
 # ==================== SNAPSHOTS ====================
 @app.get("/api/projects/{project_id}/snapshots")
 async def list_snapshots(project_id: str):
@@ -440,6 +468,38 @@ async def create_snapshot(project_id: str, req: SnapshotCreateRequest):
     snap_data = req.data if req.data is not None else (req.config or {})
     snap = db.create_snapshot(project_id, req.name, snap_data)
     return {"status": "success", "snapshot": snap}
+
+@app.get("/api/projects/{project_id}/snapshots/{snapshot_id}/download")
+async def download_snapshot(project_id: str, snapshot_id: str):
+    """Exports snapshot recipe as a standalone downloadable JSON file."""
+    import unicodedata
+    snap = db.get_snapshot(snapshot_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    nfkd = unicodedata.normalize('NFKD', snap["name"])
+    ascii_name = "".join([c for c in nfkd if not unicodedata.combining(c)])
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', ascii_name).strip('_') or f"snapshot_{snapshot_id}"
+    export_payload = {
+        "format": "gpx_motion_studio_snapshot",
+        "version": "2.3.0",
+        "exported_at": datetime.utcnow().isoformat(),
+        "snapshot": snap
+    }
+    content = json.dumps(export_payload, indent=2, ensure_ascii=False)
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.json"'}
+    )
+
+@app.post("/api/projects/{project_id}/snapshots/import")
+async def import_snapshot(project_id: str, req: dict = Body(...)):
+    """Imports snapshot from an uploaded JSON file or raw snapshot recipe."""
+    snap_data = req.get("snapshot", req)
+    name = snap_data.get("name") or req.get("name") or "Importovaný snapshot"
+    data = snap_data.get("data") or snap_data.get("config") or req.get("data") or {}
+    created = db.create_snapshot(project_id, name, data)
+    return {"status": "success", "snapshot": created}
 
 class SnapshotRenameRequest(BaseModel):
     name: str
@@ -750,11 +810,22 @@ async def finalize_export(req: FinalizeExportRequest):
 
     vf_args = ["-vf", ",".join(vf_filters)] if vf_filters else []
 
+    import unicodedata
+    raw_name = req.name.strip() if req.name else ""
+    if raw_name:
+        nfkd = unicodedata.normalize('NFKD', raw_name)
+        ascii_name = "".join([c for c in nfkd if not unicodedata.combining(c)])
+        clean_slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', ascii_name).strip('_')
+        base_title = clean_slug if clean_slug else "rekola_motion"
+    else:
+        base_title = "rekola_motion"
+
     if req.export_format == "mp4":
-        out_filename = f"rekola_motion_{req.job_id}.mp4"
+        out_filename = f"{base_title}_{req.job_id}.mp4"
         out_path = job_dir / out_filename
         cmd = [
             "ffmpeg", "-y",
+            "-threads", "0",
             "-framerate", str(req.fps),
             "-i", str(frames_dir / "frame_%05d.png"),
             *vf_args,
@@ -765,11 +836,12 @@ async def finalize_export(req: FinalizeExportRequest):
             str(out_path)
         ]
     elif req.export_format == "webm":
-        out_filename = f"rekola_motion_alpha_{req.job_id}.webm"
+        out_filename = f"{base_title}_alpha_{req.job_id}.webm"
         out_path = job_dir / out_filename
         # Multi-threaded fast VP9 transparent WebM
         cmd = [
             "ffmpeg", "-y",
+            "-threads", "0",
             "-framerate", str(req.fps),
             "-i", str(frames_dir / "frame_%05d.png"),
             *vf_args,
@@ -778,14 +850,14 @@ async def finalize_export(req: FinalizeExportRequest):
             "-b:v", "3M",
             "-speed", "4",
             "-row-mt", "1",
-            "-threads", "4",
             str(out_path)
         ]
     elif req.export_format == "prores4444":
-        out_filename = f"rekola_motion_prores4444_{req.job_id}.mov"
+        out_filename = f"{base_title}_prores4444_{req.job_id}.mov"
         out_path = job_dir / out_filename
         cmd = [
             "ffmpeg", "-y",
+            "-threads", "0",
             "-framerate", str(req.fps),
             "-i", str(frames_dir / "frame_%05d.png"),
             *vf_args,

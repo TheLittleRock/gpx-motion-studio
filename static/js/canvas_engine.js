@@ -14,7 +14,7 @@ class LabelCollisionResolver {
     this.boxes = [];
   }
 
-  canPlace(x, y, w, h, padX = 14, padY = 6) {
+  canPlace(x, y, w, h, padX = 4, padY = 2) {
     if (typeof padX === 'number' && padY === undefined) {
       padY = padX;
     }
@@ -27,7 +27,7 @@ class LabelCollisionResolver {
     return true;
   }
 
-  place(x, y, w, h, padX = 14, padY = 6) {
+  place(x, y, w, h, padX = 4, padY = 2) {
     if (typeof padX === 'number' && padY === undefined) {
       padY = padX;
     }
@@ -277,6 +277,7 @@ class CanvasRenderer {
     this.height = height;
     this.canvas.width = width;
     this.canvas.height = height;
+    this.canvasScaleFactor = width / 1920;
   }
 
   setGPXData(data, preserveWaypoints = false) {
@@ -861,10 +862,20 @@ class CanvasRenderer {
             entry = { img, loaded: false, promise, resolve: resolveFn };
             this.tileCache.set(key, entry);
             img.onload = () => {
-              entry.loaded = true;
-              if (entry.resolve) entry.resolve(true);
-              if (typeof this.onTileLoaded === 'function') {
-                this.onTileLoaded();
+              if (img.decode) {
+                img.decode().then(() => {
+                  entry.loaded = true;
+                  if (entry.resolve) entry.resolve(true);
+                  if (typeof this.onTileLoaded === 'function') this.onTileLoaded();
+                }).catch(() => {
+                  entry.loaded = true;
+                  if (entry.resolve) entry.resolve(true);
+                  if (typeof this.onTileLoaded === 'function') this.onTileLoaded();
+                });
+              } else {
+                entry.loaded = true;
+                if (entry.resolve) entry.resolve(true);
+                if (typeof this.onTileLoaded === 'function') this.onTileLoaded();
               }
             };
             img.onerror = () => {
@@ -895,13 +906,9 @@ class CanvasRenderer {
       ctx.restore();
     };
 
-    // 1. Draw base integer zoom layer
-    renderLevel(zBase, 1.0);
-
-    // 2. Cross-fade higher-detail layer if transitioning between zoom steps
-    if (zNext > zBase && blendAlpha > 0.05) {
-      renderLevel(zNext, blendAlpha);
-    }
+    // Single Integer Zoom Level with Continuous Canvas Scaling — GUARANTEED zero tile ghosting
+    const targetZ = Math.max(6, Math.min(18, Math.round(zClamped)));
+    renderLevel(targetZ, 1.0);
   }
 
   mercToScreenTiles(mx, my, centerMercX, centerMercY, zoomFractional, viewportW, viewportH) {
@@ -945,44 +952,58 @@ class CanvasRenderer {
       labelColor = (this.lod && this.lod.colorLandmarks) || '#38bdf8';
     }
 
-    // Screen-space label collision resolution: dynamically suppresses overlapping names (e.g. Sedlec-Prčice & Miličín)
-    ctx.font = `${fontWeight} ${fontSize * s}px Inter, sans-serif`;
-    const tw = ctx.measureText(name).width;
-    const boxW = tw + (dotRadius + 14) * s;
-    const boxH = fontSize * s * 1.8;
-    const boxX = x - (dotRadius + 6) * s;
-    const boxY = y - boxH / 2;
-
-    if (!this.collisionResolver.place(boxX, boxY, boxW, boxH, 18 * s, 10 * s)) {
-      return false; // Suppressed due to collision with higher priority or already placed label
-    }
-
     ctx.save();
 
-    // Dot marker with halo
+    // 1. ALWAYS draw dot marker with soft halo so geography and settlement presence are permanently visible
     ctx.fillStyle = labelColor;
     ctx.beginPath();
     ctx.arc(x, y, dotRadius * s, 0, Math.PI * 2);
     ctx.fill();
 
-    // Text Label with contrast styling
+    // 2. 4-Directional Smart Nudging (Right, Top, Bottom, Left)
     ctx.font = `${fontWeight} ${fontSize * s}px Inter, sans-serif`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
+    const tw = ctx.measureText(name).width;
+    const th = fontSize * s * 1.3;
+    const pad = 3.5 * s;
+
+    const candidates = [
+      // Right
+      { x: x + (dotRadius + 4) * s, y: y, boxX: x + (dotRadius + 4) * s, boxY: y - th / 2, boxW: tw, boxH: th, align: 'left', base: 'middle' },
+      // Top
+      { x: x, y: y - (dotRadius + 4) * s, boxX: x - tw / 2, boxY: y - (dotRadius + 4) * s - th, boxW: tw, boxH: th, align: 'center', base: 'bottom' },
+      // Bottom
+      { x: x, y: y + (dotRadius + 4) * s, boxX: x - tw / 2, boxY: y + (dotRadius + 4) * s, boxW: tw, boxH: th, align: 'center', base: 'top' },
+      // Left
+      { x: x - (dotRadius + 4) * s, y: y, boxX: x - (dotRadius + 4) * s - tw, boxY: y - th / 2, boxW: tw, boxH: th, align: 'right', base: 'middle' }
+    ];
+
+    let chosen = null;
+    for (const c of candidates) {
+      if (this.collisionResolver.place(c.boxX, c.boxY, c.boxW, c.boxH, pad, pad * 0.7)) {
+        chosen = c;
+        break;
+      }
+    }
+
+    if (!chosen) {
+      ctx.restore();
+      return true; // Dot marker is drawn, label suppressed in high-density areas
+    }
+
+    ctx.textAlign = chosen.align;
+    ctx.textBaseline = chosen.base;
 
     const textStyle = this.textContrastStyle || 'stroke_shadow';
-    const tx = x + 6 * s;
-    const ty = y;
+    const tx = chosen.x;
+    const ty = chosen.y;
 
     if (textStyle === 'pill') {
-      const tw = ctx.measureText(name).width;
-      const th = fontSize * s;
       const padX = 5 * s;
       const padY = 2.5 * s;
       ctx.fillStyle = 'rgba(15, 18, 24, 0.85)';
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 1 * s;
-      this.roundRect(ctx, tx - padX, ty - th / 2 - padY, tw + padX * 2, th + padY * 2, 4 * s);
+      this.roundRect(ctx, chosen.boxX - padX, chosen.boxY - padY, chosen.boxW + padX * 2, chosen.boxH + padY * 2, 4 * s);
       ctx.fill();
       ctx.stroke();
 
@@ -1037,7 +1058,7 @@ class CanvasRenderer {
       }
     };
 
-    // 1. Water Bodies: Lakes & Dams (Background)
+    // 1. Water Bodies: Lakes & Dams (Smooth Curved Geometry & Minimalist Labels)
     if (this.lod && this.lod.lakes_dams !== false && layers.lakes_dams) {
       const lakesOpacity = (this.lod && this.lod.lakesOpacity !== undefined) ? this.lod.lakesOpacity : 0.35;
       ctx.fillStyle = this.hexToRgba(this.colors.river || '#38bdf8', lakesOpacity);
@@ -1046,15 +1067,42 @@ class CanvasRenderer {
       for (const l of layers.lakes_dams) {
         if (l.id && !this.isFeatureVisible(l.id)) continue;
         if (!l.points || l.points.length < 3) continue;
+        const smoothed = this.subdivideCatmullRom(l.points, 4);
         ctx.beginPath();
-        for (let i = 0; i < l.points.length; i++) {
-          const pt = toScreen(l.points[i].mx, l.points[i].my);
+        for (let i = 0; i < smoothed.length; i++) {
+          const pt = toScreen(smoothed[i].mx, smoothed[i].my);
           if (i === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         }
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
+
+        // Minimalist water body name label (placed at centroid)
+        if (l.name && this.lod.riverNames !== false) {
+          let sumX = 0, sumY = 0;
+          for (const p of l.points) {
+            const pt = toScreen(p.mx, p.my);
+            sumX += pt.x;
+            sumY += pt.y;
+          }
+          const cX = sumX / l.points.length;
+          const cY = sumY / l.points.length;
+          if (cX >= 20 && cX <= this.width - 20 && cY >= 20 && cY <= this.height - 20) {
+            if (this.collisionResolver.place(cX - 50 * s, cY - 10 * s, 100 * s, 20 * s, 4 * s, 2 * s)) {
+              ctx.save();
+              ctx.font = `600 ${9.5 * s}px Inter, sans-serif`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.strokeStyle = 'rgba(10, 14, 20, 0.95)';
+              ctx.lineWidth = 2.5 * s;
+              ctx.strokeText(`💧 ${l.name}`, cX, cY);
+              ctx.fillStyle = this.colors.river || '#38bdf8';
+              ctx.fillText(`💧 ${l.name}`, cX, cY);
+              ctx.restore();
+            }
+          }
+        }
       }
     }
 
@@ -2502,25 +2550,45 @@ class CanvasRenderer {
       });
     }
 
-    // 1. Water Bodies: Lakes & Dams on Minimap (Soft Background)
+    // 1. Water Bodies: Lakes & Dams on Minimap (Smooth Curved Background & Minimalist Labels)
     if (this.lod && this.lod.lakes_dams !== false && this.vectorLayers && this.vectorLayers.lakes_dams) {
       const lakesOpacity = ((this.lod && this.lod.lakesOpacity !== undefined) ? this.lod.lakesOpacity : 0.35) * 0.7;
       ctx.fillStyle = this.hexToRgba(this.colors.river || '#38bdf8', lakesOpacity);
       for (const l of this.vectorLayers.lakes_dams) {
         if (l.id && !this.isFeatureVisible(l.id)) continue;
         if (!l.points || l.points.length < 3) continue;
+        const smoothed = this.subdivideCatmullRom(l.points, 3);
         ctx.beginPath();
-        for (let i = 0; i < l.points.length; i++) {
-          const pt = toMiniMap(l.points[i].mx, l.points[i].my);
+        let sumX = 0, sumY = 0;
+        for (let i = 0; i < smoothed.length; i++) {
+          const pt = toMiniMap(smoothed[i].mx, smoothed[i].my);
+          sumX += pt.x;
+          sumY += pt.y;
           if (i === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         }
         ctx.closePath();
         ctx.fill();
+
+        if (l.name && this.lod.riverNames !== false) {
+          const cX = sumX / smoothed.length;
+          const cY = sumY / smoothed.length;
+          if (cX >= boxX + 12 && cX <= boxX + boxW - 12 && cY >= boxY + 36 * s && cY <= boxY + boxH - 12) {
+            ctx.save();
+            ctx.font = `600 ${6.5 * s}px Inter, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = this.colors.river || '#38bdf8';
+            ctx.shadowColor = 'rgba(10, 14, 20, 0.95)';
+            ctx.shadowBlur = 2.5 * s;
+            ctx.fillText(`💧 ${l.name}`, cX, cY);
+            ctx.restore();
+          }
+        }
       }
     }
 
-    // 2. Rivers on Minimap (Soft Background, respecting LOD opacity & width & rank)
+    // 2. Rivers on Minimap (Soft Background & subtle river names)
     if (this.toggles.rivers && this.vectorLayers && this.vectorLayers.rivers) {
       const filterRank = (this.lod && this.lod.riverFilterRank !== undefined) ? this.lod.riverFilterRank : 3;
       const rOpacity = ((this.lod && this.lod.riverOpacity !== undefined) ? this.lod.riverOpacity : 0.35) * 0.65;
@@ -2542,6 +2610,33 @@ class CanvasRenderer {
           else ctx.lineTo(pt.x, pt.y);
         }
         ctx.stroke();
+
+        // River name label in Minimap
+        if (this.lod && this.lod.riverNames !== false && river.name && river.points.length >= 3) {
+          const midIdx = Math.floor(river.points.length / 2);
+          const p1 = toMiniMap(river.points[midIdx].mx, river.points[midIdx].my);
+          const p2 = toMiniMap(river.points[Math.min(river.points.length - 1, midIdx + 1)].mx, river.points[Math.min(river.points.length - 1, midIdx + 1)].my);
+          if (p1.x >= boxX + 10 && p1.x <= boxX + boxW - 10 && p1.y >= boxY + 36 * s && p1.y <= boxY + boxH - 10) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            let angle = Math.atan2(dy, dx);
+            if (angle > Math.PI / 2) angle -= Math.PI;
+            else if (angle < -Math.PI / 2) angle += Math.PI;
+
+            ctx.save();
+            ctx.translate(p1.x, p1.y);
+            ctx.rotate(angle);
+            ctx.font = `600 ${6.8 * s}px Inter, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.strokeStyle = 'rgba(10, 14, 20, 0.95)';
+            ctx.lineWidth = 2 * s;
+            ctx.strokeText(`〰 ${river.name}`, 0, 0);
+            ctx.fillStyle = this.colors.river || '#38bdf8';
+            ctx.fillText(`〰 ${river.name}`, 0, 0);
+            ctx.restore();
+          }
+        }
       }
     }
 
@@ -2641,10 +2736,17 @@ class CanvasRenderer {
     ctx.stroke();
     ctx.restore();
 
-    // 6. Waypoints Pins & Labels on Minimap (Added user points and corridor landmarks)
+    // 6. Waypoints Pins & Labels on Minimap (Deduplicated with corridor landmarks)
+    const seenMinimapPins = new Set();
+    const pinColor = (this.colors && this.colors.waypointPin) || '#f59e0b';
+    const textColor = (this.colors && this.colors.waypointText) || '#f0f6fc';
+
     if (this.toggles.waypoints && this.waypoints) {
       for (const wp of this.waypoints) {
         if (wp.id && !this.isFeatureVisible(wp.id)) continue;
+        const normKey = (wp.title || '').trim().toLowerCase();
+        if (normKey) seenMinimapPins.add(normKey);
+
         let pt;
         if (wp.lat != null && wp.lon != null) {
           const mxmy = this.latLonToMercator(wp.lat, wp.lon);
@@ -2656,7 +2758,7 @@ class CanvasRenderer {
         if (pt.x < boxX + 6 || pt.x > boxX + boxW - 6 || pt.y < boxY + 32 * s || pt.y > boxY + boxH - 6) continue;
 
         ctx.save();
-        ctx.fillStyle = '#f59e0b';
+        ctx.fillStyle = pinColor;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1 * s;
         ctx.beginPath();
@@ -2665,7 +2767,7 @@ class CanvasRenderer {
         ctx.stroke();
 
         ctx.font = `700 ${7.5 * s}px Inter, sans-serif`;
-        ctx.fillStyle = '#f0f6fc';
+        ctx.fillStyle = textColor;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
@@ -2675,10 +2777,14 @@ class CanvasRenderer {
       }
     }
 
-    // 6B. Corridor Landmarks on Minimap
+    // 6B. Corridor Landmarks on Minimap (Skips landmarks that match existing waypoint to avoid duplicate pins/labels)
     if (this.toggles.landmarks && this.landmarks) {
       for (const lm of this.landmarks) {
         if (lm.id && !this.isFeatureVisible(lm.id)) continue;
+        const normKey = (lm.name || '').trim().toLowerCase();
+        if (normKey && seenMinimapPins.has(normKey)) continue; // SKIP DUPLICATE!
+        seenMinimapPins.add(normKey);
+
         const mxmy = this.latLonToMercator(lm.lat, lm.lon);
         if (mxmy.x >= b.min_mx && mxmy.x <= b.max_mx && mxmy.y >= b.min_my && mxmy.y <= b.max_my) {
           const pt = toMiniMap(mxmy.x, mxmy.y);
@@ -3060,19 +3166,29 @@ class CanvasRenderer {
     let factor = 0;
     let bestCloseness = Infinity;
 
+    const totalDist = (this.gpxData && this.gpxData.total_distance_km) || (pts[n - 1] && pts[n - 1].dist_km) || 100;
+
     for (const wp of this.waypoints) {
       if (wp.showBanner === false) continue;
 
-      const trackIdx = this.getWaypointTrackIndex(wp);
-      const trackProg = trackIdx / Math.max(1, n - 1);
+      let wpDist = (wp.dist_km !== undefined && wp.dist_km !== null) ? Number(wp.dist_km) : null;
+      if (wpDist === null) {
+        const trackIdx = this.getWaypointTrackIndex(wp);
+        wpDist = (pts[trackIdx] && pts[trackIdx].dist_km) || 0;
+      }
+
+      const distProg = Math.max(0, Math.min(1, wpDist / totalDist));
 
       let normProg;
       if (this.trimMode === 'fit') {
         const tRange = Math.max(0.0001, this.trimOut - this.trimIn);
-        normProg = (trackProg - this.trimIn) / tRange;
+        normProg = (distProg - this.trimIn) / tRange;
       } else {
-        normProg = trackProg;
+        normProg = distProg;
       }
+
+      // If waypoint is outside trimmed route, suppress callout
+      if (normProg < -0.05 || normProg > 1.05) continue;
 
       // Expected arrival time in animation seconds
       const arrivalSec = normProg * totalDuration;

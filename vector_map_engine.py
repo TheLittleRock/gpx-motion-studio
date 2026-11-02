@@ -89,65 +89,102 @@ HIGH_RES_RIVERS = [
     }
 ]
 
-# Major Dams & Lakes (Water Body Polygons for LOD)
+# Major Dams & Lakes (Water Body Polygons for LOD with smooth curvature and river connection)
 LAKES_DAMS_DATA = [
     {
         "id": "dam_lipno",
         "name": "Vodní nádrž Lipno",
         "type": "lake",
+        "label": "Lipno",
         "coords": [
-            [48.630, 14.120], [48.660, 14.100], [48.720, 14.020], [48.760, 14.060],
-            [48.750, 14.150], [48.700, 14.200], [48.650, 14.240], [48.630, 14.180]
+            [48.630, 14.120], [48.645, 14.110], [48.665, 14.095], [48.690, 14.060],
+            [48.720, 14.020], [48.745, 14.035], [48.765, 14.065], [48.760, 14.110],
+            [48.745, 14.150], [48.725, 14.185], [48.700, 14.215], [48.675, 14.235],
+            [48.650, 14.240], [48.635, 14.210], [48.630, 14.160]
         ]
     },
     {
         "id": "dam_orlik",
         "name": "Vodní nádrž Orlík",
         "type": "dam",
+        "label": "Orlík",
         "coords": [
-            [49.340, 14.200], [49.420, 14.180], [49.560, 14.170], [49.600, 14.180],
-            [49.610, 14.200], [49.540, 14.200], [49.430, 14.210], [49.350, 14.220]
+            [49.340, 14.200], [49.375, 14.190], [49.410, 14.180], [49.445, 14.185],
+            [49.480, 14.175], [49.520, 14.165], [49.560, 14.168], [49.595, 14.175],
+            [49.610, 14.195], [49.590, 14.205], [49.550, 14.200], [49.510, 14.205],
+            [49.460, 14.210], [49.420, 14.215], [49.380, 14.220], [49.345, 14.215]
         ]
     },
     {
         "id": "dam_slapy",
         "name": "Vodní nádrž Slapy",
         "type": "dam",
+        "label": "Slapy",
         "coords": [
-            [49.680, 14.330], [49.740, 14.410], [49.820, 14.430], [49.825, 14.445],
-            [49.780, 14.430], [49.730, 14.390], [49.670, 14.320]
+            [49.670, 14.320], [49.695, 14.340], [49.720, 14.375], [49.745, 14.410],
+            [49.775, 14.425], [49.805, 14.435], [49.825, 14.445], [49.820, 14.430],
+            [49.790, 14.420], [49.760, 14.405], [49.730, 14.370], [49.705, 14.335],
+            [49.675, 14.310]
         ]
     },
     {
         "id": "dam_kamyk",
         "name": "Vodní nádrž Kamýk",
         "type": "dam",
+        "label": "Kamýk",
         "coords": [
-            [49.620, 14.250], [49.645, 14.280], [49.650, 14.300], [49.635, 14.290], [49.615, 14.260]
+            [49.615, 14.248], [49.630, 14.265], [49.645, 14.285], [49.652, 14.305],
+            [49.648, 14.308], [49.638, 14.295], [49.622, 14.275], [49.612, 14.255]
         ]
     },
     {
         "id": "dam_stechovice",
         "name": "Vodní nádrž Štěchovice",
         "type": "dam",
+        "label": "Štěchovice",
         "coords": [
-            [49.830, 14.430], [49.855, 14.420], [49.860, 14.425], [49.835, 14.440]
+            [49.830, 14.430], [49.845, 14.425], [49.855, 14.420], [49.862, 14.428],
+            [49.855, 14.432], [49.845, 14.438], [49.835, 14.442]
+        ]
+    },
+    {
+        "id": "dam_hnevkovice",
+        "name": "Vodní dílo Hněvkovice",
+        "type": "dam",
+        "label": "Hněvkovice",
+        "coords": [
+            [49.170, 14.430], [49.185, 14.435], [49.200, 14.438], [49.210, 14.435],
+            [49.205, 14.442], [49.190, 14.445], [49.175, 14.440]
         ]
     },
     {
         "id": "lake_rozmberk",
         "name": "Rybník Rožmberk",
         "type": "lake",
+        "label": "Rožmberk",
         "coords": [
-            [49.040, 14.750], [49.060, 14.760], [49.065, 14.790], [49.045, 14.790], [49.035, 14.765]
+            [49.035, 14.750], [49.048, 14.745], [49.062, 14.760], [49.068, 14.785],
+            [49.055, 14.800], [49.040, 14.795], [49.030, 14.770]
+        ]
+    },
+    {
+        "id": "lake_svet",
+        "name": "Rybník Svět (Třeboň)",
+        "type": "lake",
+        "label": "Rybník Svět",
+        "coords": [
+            [48.995, 14.755], [49.002, 14.750], [49.010, 14.760], [49.005, 14.772],
+            [48.992, 14.775], [48.988, 14.765]
         ]
     },
     {
         "id": "lake_jordan",
         "name": "Vodní nádrž Jordán (Tábor)",
         "type": "lake",
+        "label": "Jordán",
         "coords": [
-            [49.414, 14.660], [49.425, 14.665], [49.427, 14.675], [49.415, 14.670]
+            [49.412, 14.655], [49.420, 14.662], [49.428, 14.672], [49.425, 14.678],
+            [49.418, 14.672], [49.412, 14.665]
         ]
     }
 ]
@@ -305,12 +342,13 @@ RANKED_PLACES = [
     {"id": "place_sedlec", "name": "Sedlec-Prčice", "rank": 3, "lat": 49.578, "lon": 14.538, "type": "village"},
     {"id": "place_milicin", "name": "Miličín", "rank": 3, "lat": 49.570, "lon": 14.660, "type": "village"},
     {"id": "place_davle", "name": "Davle", "rank": 3, "lat": 49.880, "lon": 14.398, "type": "village"},
-    {"id": "place_jilove", "name": "Jílové u Prahy", "rank": 3, "lat": 49.894, "lon": 14.493, "type": "village"},
+    {"id": "place_jilove", "name": "Jílové u Prahy", "rank": 3, "lat": 49.894, "lon": 14.493, "type": "town"},
     {"id": "place_stechovice", "name": "Štěchovice", "rank": 3, "lat": 49.851, "lon": 14.405, "type": "village"},
     {"id": "place_kamyk", "name": "Kamýk nad Vltavou", "rank": 3, "lat": 49.638, "lon": 14.256, "type": "village"},
     {"id": "place_bechyne", "name": "Bechyně", "rank": 3, "lat": 49.296, "lon": 14.468, "type": "town"},
     {"id": "place_malsice", "name": "Malšice", "rank": 3, "lat": 49.362, "lon": 14.582, "type": "village"},
     {"id": "place_plana_luz", "name": "Planá nad Lužnicí", "rank": 3, "lat": 49.353, "lon": 14.701, "type": "town"},
+    {"id": "place_sezimovo_usti", "name": "Sezimovo Ústí", "rank": 2, "lat": 49.385, "lon": 14.685, "type": "town"},
     {"id": "place_choustnik_vill", "name": "Choustník", "rank": 3, "lat": 49.324, "lon": 14.853, "type": "village"},
     {"id": "place_mlada_vozice", "name": "Mladá Vožice", "rank": 3, "lat": 49.532, "lon": 14.808, "type": "town"},
     {"id": "place_protivin", "name": "Protivín", "rank": 3, "lat": 49.200, "lon": 14.217, "type": "town"},
@@ -324,10 +362,63 @@ RANKED_PLACES = [
     {"id": "place_zvikov_podhradi", "name": "Zvíkovské Podhradí", "rank": 3, "lat": 49.435, "lon": 14.200, "type": "village"},
     {"id": "place_purkarec", "name": "Purkarec", "rank": 3, "lat": 49.128, "lon": 14.453, "type": "village"},
     {"id": "place_borovany", "name": "Borovany", "rank": 3, "lat": 48.898, "lon": 14.642, "type": "town"},
-    {"id": "place_lisov", "name": "Lišov", "rank": 3, "lat": 49.018, "lon": 14.613, "type": "town"}
+    {"id": "place_lisov", "name": "Lišov", "rank": 3, "lat": 49.018, "lon": 14.613, "type": "town"},
+    {"id": "place_jesenice_pz", "name": "Jesenice", "rank": 3, "lat": 49.968, "lon": 14.513, "type": "town"},
+    {"id": "place_psary", "name": "Psáry", "rank": 3, "lat": 49.938, "lon": 14.512, "type": "village"},
+    {"id": "place_dolni_brezany", "name": "Dolní Břežany", "rank": 3, "lat": 49.963, "lon": 14.460, "type": "village"},
+    {"id": "place_vrane", "name": "Vrané nad Vltavou", "rank": 3, "lat": 49.940, "lon": 14.385, "type": "village"},
+    {"id": "place_kamenny_privoz", "name": "Kamenný Přívoz", "rank": 3, "lat": 49.866, "lon": 14.505, "type": "village"},
+    {"id": "place_krnany", "name": "Krňany", "rank": 3, "lat": 49.832, "lon": 14.456, "type": "village"},
+    {"id": "place_lesany", "name": "Lešany", "rank": 3, "lat": 49.805, "lon": 14.525, "type": "village"},
+    {"id": "place_bystrice", "name": "Bystřice", "rank": 3, "lat": 49.732, "lon": 14.667, "type": "town"},
+    {"id": "place_olbramovice", "name": "Olbramovice", "rank": 3, "lat": 49.688, "lon": 14.638, "type": "village"},
+    {"id": "place_marsovice", "name": "Maršovice", "rank": 3, "lat": 49.715, "lon": 14.560, "type": "village"},
+    {"id": "place_jankov", "name": "Jankov", "rank": 3, "lat": 49.652, "lon": 14.730, "type": "village"},
+    {"id": "place_kosova_hora", "name": "Kosova Hora", "rank": 3, "lat": 49.655, "lon": 14.472, "type": "village"},
+    {"id": "place_mezno", "name": "Mezno", "rank": 3, "lat": 49.525, "lon": 14.655, "type": "village"},
+    {"id": "place_strezimir", "name": "Střezimíř", "rank": 3, "lat": 49.535, "lon": 14.618, "type": "village"},
+    {"id": "place_borotin", "name": "Borotín", "rank": 3, "lat": 49.498, "lon": 14.582, "type": "village"},
+    {"id": "place_chotoviny", "name": "Chotoviny", "rank": 3, "lat": 49.478, "lon": 14.678, "type": "village"},
+    {"id": "place_jistebnice", "name": "Jistebnice", "rank": 3, "lat": 49.485, "lon": 14.528, "type": "town"},
+    {"id": "place_nadejkov", "name": "Nadějkov", "rank": 3, "lat": 49.503, "lon": 14.482, "type": "village"},
+    {"id": "place_drazice", "name": "Dražice", "rank": 3, "lat": 49.435, "lon": 14.565, "type": "village"},
+    {"id": "place_roudna", "name": "Roudná", "rank": 3, "lat": 49.312, "lon": 14.708, "type": "village"},
+    {"id": "place_klenovice", "name": "Klenovice", "rank": 3, "lat": 49.288, "lon": 14.712, "type": "village"},
+    {"id": "place_drachov", "name": "Dráchov", "rank": 3, "lat": 49.230, "lon": 14.712, "type": "village"},
+    {"id": "place_bosilec", "name": "Bošilec", "rank": 3, "lat": 49.145, "lon": 14.658, "type": "village"},
+    {"id": "place_dynin", "name": "Dynín", "rank": 3, "lat": 49.130, "lon": 14.650, "type": "village"},
+    {"id": "place_dolni_bukovsko", "name": "Dolní Bukovsko", "rank": 3, "lat": 49.168, "lon": 14.580, "type": "town"},
+    {"id": "place_sevetin", "name": "Ševětín", "rank": 3, "lat": 49.083, "lon": 14.580, "type": "town"},
+    {"id": "place_neplachov", "name": "Neplachov", "rank": 3, "lat": 49.112, "lon": 14.618, "type": "village"},
+    {"id": "place_chotycany", "name": "Chotýčany", "rank": 3, "lat": 49.055, "lon": 14.518, "type": "village"},
+    {"id": "place_hosin", "name": "Hosín", "rank": 3, "lat": 49.035, "lon": 14.482, "type": "village"},
+    {"id": "place_hrdejovice", "name": "Hrdějovice", "rank": 3, "lat": 49.015, "lon": 14.468, "type": "village"},
+    {"id": "place_borek_cb", "name": "Borek", "rank": 3, "lat": 49.018, "lon": 14.502, "type": "village"},
+    {"id": "place_usilne", "name": "Úsilné", "rank": 3, "lat": 49.008, "lon": 14.508, "type": "village"},
+    {"id": "place_rudolfov", "name": "Rudolfov", "rank": 3, "lat": 48.995, "lon": 14.542, "type": "town"},
+    {"id": "place_dobra_voda", "name": "Dobrá Voda u Českých Budějovic", "rank": 3, "lat": 48.968, "lon": 14.528, "type": "village"},
+    {"id": "place_vcelna", "name": "Včelná", "rank": 3, "lat": 48.932, "lon": 14.452, "type": "village"},
+    {"id": "place_roudne", "name": "Roudné", "rank": 3, "lat": 48.935, "lon": 14.492, "type": "village"},
+    {"id": "place_plana_cb", "name": "Planá", "rank": 3, "lat": 48.948, "lon": 14.455, "type": "village"},
+    {"id": "place_homole", "name": "Homole", "rank": 3, "lat": 48.940, "lon": 14.425, "type": "village"},
+    {"id": "place_borsov", "name": "Boršov nad Vltavou", "rank": 3, "lat": 48.922, "lon": 14.435, "type": "village"},
+    {"id": "place_kamenny_ujezd", "name": "Kamenný Újezd", "rank": 3, "lat": 48.898, "lon": 14.450, "type": "village"},
+    {"id": "place_zlata_koruna_vill", "name": "Zlatá Koruna", "rank": 3, "lat": 48.855, "lon": 14.370, "type": "village"},
+    {"id": "place_kremze", "name": "Křemže", "rank": 3, "lat": 48.905, "lon": 14.305, "type": "town"},
+    {"id": "place_chvalsiny", "name": "Chvalšiny", "rank": 3, "lat": 48.855, "lon": 14.212, "type": "village"},
+    {"id": "place_vetrni", "name": "Větřní", "rank": 3, "lat": 48.775, "lon": 14.290, "type": "town"},
+    {"id": "place_frymburk", "name": "Frymburk", "rank": 3, "lat": 48.660, "lon": 14.165, "type": "town"},
+    {"id": "place_cerna_posumavi", "name": "Černá v Pošumaví", "rank": 3, "lat": 48.738, "lon": 14.108, "type": "village"},
+    {"id": "place_horni_plana", "name": "Horní Planá", "rank": 3, "lat": 48.767, "lon": 14.032, "type": "town"},
+    {"id": "place_volary", "name": "Volary", "rank": 3, "lat": 48.915, "lon": 13.888, "type": "town"},
+    {"id": "place_netolice", "name": "Netolice", "rank": 3, "lat": 49.048, "lon": 14.195, "type": "town"},
+    {"id": "place_bernartice", "name": "Bernartice", "rank": 3, "lat": 49.370, "lon": 14.380, "type": "village"},
+    {"id": "place_stepanovice", "name": "Štěpánovice", "rank": 3, "lat": 48.995, "lon": 14.658, "type": "village"},
+    {"id": "place_ledenice", "name": "Ledenice", "rank": 3, "lat": 48.932, "lon": 14.620, "type": "town"},
+    {"id": "place_lomnice_luz", "name": "Lomnice nad Lužnicí", "rank": 3, "lat": 49.085, "lon": 14.718, "type": "town"}
 ]
 
-# Comprehensive Catalog of Czech Landmarks, Castles, Peaks & Viewpoints
+# Comprehensive Catalog of Czech Landmarks, Castles, Peaks & Viewpoints (water bodies moved to dedicated LAKES_DAMS_DATA layer)
 CORRIDOR_LANDMARKS = [
     # --- Prague & Central Bohemia ---
     {"id": "lm_vysehrad", "name": "Vyšehrad", "lat": 50.068281, "lon": 14.424340, "category": "castle", "subtitle": "Královská akropole • 50°4'5.8\"N, 14°25'27.6\"E"},
@@ -337,9 +428,6 @@ CORRIDOR_LANDMARKS = [
     {"id": "lm_dobris_castle", "name": "Zámek Dobříš", "lat": 49.781, "lon": 14.178, "category": "castle", "subtitle": "Rokokový zámek s francouzským parkem"},
     {"id": "lm_vrchotovy_janovice", "name": "Zámek Vrchotovy Janovice", "lat": 49.667, "lon": 14.580, "category": "castle", "subtitle": "Zámecký park Sidonie Nádherné"},
     {"id": "lm_velky_blanik", "name": "Velký Blaník (638 m)", "lat": 49.642, "lon": 14.871, "category": "peak", "subtitle": "Památná hora s dřevěnou rozhlednou"},
-    {"id": "lm_slapy", "name": "Slapská přehrada", "lat": 49.824, "lon": 14.435, "category": "water", "subtitle": "Vltavská kaskáda"},
-    {"id": "lm_soutok", "name": "Soutok Vltavy a Sázavy", "lat": 49.884, "lon": 14.399, "category": "water", "subtitle": "Davle"},
-    {"id": "lm_kamyk_dam", "name": "Přehrada Kamýk", "lat": 49.638, "lon": 14.256, "category": "water", "subtitle": "Vltavská vodní cesta"},
 
     # --- South Bohemia & Middle Vltava ---
     {"id": "lm_javorova_skala", "name": "Javorová skála (723 m)", "lat": 49.549, "lon": 14.502, "category": "peak", "subtitle": "Čertovo břemeno • Monínec"},
@@ -352,14 +440,11 @@ CORRIDOR_LANDMARKS = [
     {"id": "lm_cervena_lhota", "name": "Zámek Červená Lhota", "lat": 49.246, "lon": 14.885, "category": "castle", "subtitle": "Vodní zámek na skalním ostrohu"},
     {"id": "lm_bechyne_bridge", "name": "Bechyňská duha", "lat": 49.293, "lon": 14.475, "category": "viewpoint", "subtitle": "Železobetonový most přes Lužnici"},
     {"id": "lm_hluboka", "name": "Zámek Hluboká", "lat": 49.051, "lon": 14.441, "category": "castle", "subtitle": "Novogotický klenot jižních Čech"},
-    {"id": "lm_hnevkovice", "name": "Vodní dílo Hněvkovice", "lat": 49.179, "lon": 14.436, "category": "water", "subtitle": "Vltavský plavební stupeň"},
     {"id": "lm_krumlov_castle", "name": "Zámek Český Krumlov", "lat": 48.813, "lon": 14.314, "category": "castle", "subtitle": "UNESCO památka nad meandry Vltavy"},
     {"id": "lm_klet", "name": "Kleť (1084 m)", "lat": 48.865, "lon": 14.283, "category": "peak", "subtitle": "Josefova věž • Nejstarší kamenná rozhledna v ČR"},
     {"id": "lm_divci_kamen", "name": "Dívčí Kámen", "lat": 48.889, "lon": 14.356, "category": "castle", "subtitle": "Mohutná hradní zřícenina nad Vltavou"},
     {"id": "lm_zlata_koruna", "name": "Klášter Zlatá Koruna", "lat": 48.855, "lon": 14.371, "category": "culture", "subtitle": "Cisterciácký klášter z roku 1263"},
     {"id": "lm_rozmberk", "name": "Hrad Rožmberk", "lat": 48.654, "lon": 14.366, "category": "castle", "subtitle": "Kolébka rodu Rožmberků nad Vltavou"},
-    {"id": "lm_lipno_dam", "name": "Přehrada Lipno", "lat": 48.636, "lon": 14.240, "category": "water", "subtitle": "Jihočeské moře"},
-    {"id": "lm_rozmberk_lake", "name": "Rybník Rožmberk", "lat": 49.049, "lon": 14.772, "category": "water", "subtitle": "Největší rybník na světě • Jakub Krčín"},
     {"id": "lm_pisek_bridge", "name": "Kamenný most v Písku", "lat": 49.309, "lon": 14.147, "category": "viewpoint", "subtitle": "Nejstarší dochovaný most v Česku (13. stol.)"}
 ]
 
@@ -479,6 +564,33 @@ def deduplicate_points(places, landmarks, threshold_km=5.0):
             filtered_places.append(pl)
     return filtered_places
 
+EXTENDED_VILLAGES = [
+    {"id": "ev_radlik", "name": "Radlík", "rank": 3, "lat": 49.905, "lon": 14.485, "type": "village"},
+    {"id": "ev_kostelec_krizku", "name": "Kostelec u Křížků", "rank": 3, "lat": 49.910, "lon": 14.550, "type": "village"},
+    {"id": "ev_sulice", "name": "Sulice", "rank": 3, "lat": 49.925, "lon": 14.535, "type": "village"},
+    {"id": "ev_kamenice", "name": "Kamenice", "rank": 3, "lat": 49.902, "lon": 14.580, "type": "village"},
+    {"id": "ev_stirin", "name": "Štiřín", "rank": 3, "lat": 49.912, "lon": 14.595, "type": "village"},
+    {"id": "ev_velke_popovice", "name": "Velké Popovice", "rank": 3, "lat": 49.923, "lon": 14.640, "type": "village"},
+    {"id": "ev_pysely", "name": "Pyšely", "rank": 3, "lat": 49.878, "lon": 14.678, "type": "village"},
+    {"id": "ev_cercany", "name": "Čerčany", "rank": 2, "lat": 49.850, "lon": 14.700, "type": "town"},
+    {"id": "ev_porici_sazavou", "name": "Poříčí nad Sázavou", "rank": 3, "lat": 49.840, "lon": 14.680, "type": "village"},
+    {"id": "ev_bukovany", "name": "Bukovany", "rank": 3, "lat": 49.825, "lon": 14.635, "type": "village"},
+    {"id": "ev_tynec_sazavou", "name": "Týnec nad Sázavou", "rank": 2, "lat": 49.830, "lon": 14.593, "type": "town"},
+    {"id": "ev_krnsany", "name": "Krňany", "rank": 3, "lat": 49.833, "lon": 14.470, "type": "village"},
+    {"id": "ev_vysoky_ujezd", "name": "Vysoký Újezd", "rank": 3, "lat": 49.815, "lon": 14.475, "type": "village"},
+    {"id": "ev_rabyn", "name": "Rabyně", "rank": 3, "lat": 49.790, "lon": 14.430, "type": "village"},
+    {"id": "ev_jablon_vltavou", "name": "Jablonná", "rank": 3, "lat": 49.755, "lon": 14.425, "type": "village"},
+    {"id": "ev_tlokov", "name": "Tloskov", "rank": 3, "lat": 49.760, "lon": 14.515, "type": "village"},
+    {"id": "ev_vrchotovy_janovice", "name": "Vrchotovy Janovice", "rank": 3, "lat": 49.668, "lon": 14.580, "type": "village"},
+    {"id": "ev_jesenice_sedlc", "name": "Jesenice u Sedlčan", "rank": 3, "lat": 49.610, "lon": 14.480, "type": "village"},
+    {"id": "ev_cerveny_ujezd", "name": "Červený Újezd", "rank": 3, "lat": 49.555, "lon": 14.605, "type": "village"},
+    {"id": "ev_plana_luznici", "name": "Planá nad Lužnicí", "rank": 2, "lat": 49.354, "lon": 14.702, "type": "town"},
+    {"id": "ev_sobeslav", "name": "Soběslav", "rank": 2, "lat": 49.260, "lon": 14.718, "type": "town"},
+    {"id": "ev_veseli_luznici", "name": "Veselí nad Lužnicí", "rank": 2, "lat": 49.185, "lon": 14.698, "type": "town"},
+    {"id": "ev_cesky_krumlov", "name": "Český Krumlov", "rank": 1, "lat": 48.812, "lon": 14.316, "type": "city"},
+    {"id": "ev_kaplice", "name": "Kaplice", "rank": 2, "lat": 48.738, "lon": 14.495, "type": "town"}
+]
+
 class VectorMapEngine:
     def __init__(self, db: ProjectDatabase = None):
         self.db = db or ProjectDatabase()
@@ -523,6 +635,123 @@ class VectorMapEngine:
             "landmarks": raw_landmarks
         }
         return layers
+
+    def expand_corridor_places(self, gpx_points, bbox=None, corridor_km=25.0):
+        """Fetches additional towns, villages, and hamlets from Overpass API (with disk caching)
+        to densely populate the GPX corridor beyond the built-in catalog."""
+        import os, urllib.request, urllib.parse, hashlib
+        from pathlib import Path
+
+        cache_dir = Path("data/places_cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        if not bbox and gpx_points:
+            lats = [p["lat"] for p in gpx_points if "lat" in p]
+            lons = [p["lon"] for p in gpx_points if "lon" in p]
+            if lats and lons:
+                bbox = {
+                    "min_lat": max(48.5, min(lats) - 0.15),
+                    "min_lon": max(12.0, min(lons) - 0.20),
+                    "max_lat": min(51.1, max(lats) + 0.15),
+                    "max_lon": min(18.9, max(lons) + 0.20),
+                }
+
+        if not bbox:
+            return []
+
+        bbox_str = f"{bbox['min_lat']:.4f},{bbox['min_lon']:.4f},{bbox['max_lat']:.4f},{bbox['max_lon']:.4f}"
+        cache_key = hashlib.md5(bbox_str.encode()).hexdigest()
+        cache_file = cache_dir / f"places_{cache_key}.json"
+
+        elements = []
+        if cache_file.exists() and cache_file.stat().st_size > 100:
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    elements = json.load(f)
+            except Exception:
+                pass
+
+        if not elements:
+            overpass_query = f"""
+            [out:json][timeout:12];
+            (
+              node["place"~"town|village|hamlet"]({bbox_str});
+            );
+            out body;
+            """
+            try:
+                url = "https://overpass-api.de/api/interpreter"
+                data = urllib.parse.urlencode({"data": overpass_query}).encode("utf-8")
+                req = urllib.request.Request(url, data=data, headers={"User-Agent": "GPXMotionStudio/2.3 (support@rekola.cz)"})
+                with urllib.request.urlopen(req, timeout=4) as resp:
+                    if resp.status == 200:
+                        res = json.loads(resp.read().decode("utf-8"))
+                        elements = res.get("elements", [])
+                        with open(cache_file, "w", encoding="utf-8") as f:
+                            json.dump(elements, f, ensure_ascii=False)
+            except Exception as e:
+                print(f"Overpass API fetch error: {e}")
+
+        new_places = []
+        existing_ids = {p["id"] for p in RANKED_PLACES}
+
+        # 1. Add elements from Overpass if available
+        for el in elements:
+            tags = el.get("tags", {})
+            name = tags.get("name")
+            if not name:
+                continue
+            lat = el.get("lat")
+            lon = el.get("lon")
+            if lat is None or lon is None:
+                continue
+
+            if gpx_points:
+                d = distance_to_polyline_km(lat, lon, gpx_points)
+                if d > corridor_km:
+                    continue
+
+            p_type = tags.get("place", "village")
+            rank = 2 if p_type == "town" else (3 if p_type == "village" else 4)
+            p_id = f"op_{el.get('id')}"
+            if p_id in existing_ids:
+                continue
+            existing_ids.add(p_id)
+
+            mx, my = lat_lon_to_mercator(lat, lon)
+            new_places.append({
+                "id": p_id,
+                "name": name,
+                "lat": round(lat, 5),
+                "lon": round(lon, 5),
+                "rank": rank,
+                "type": p_type,
+                "mx": mx,
+                "my": my
+            })
+
+        # 2. Rich offline settlement catalog fallback
+        for ev in EXTENDED_VILLAGES:
+            if ev["id"] in existing_ids:
+                continue
+            if gpx_points:
+                d = distance_to_polyline_km(ev["lat"], ev["lon"], gpx_points)
+                if d > corridor_km:
+                    continue
+            existing_ids.add(ev["id"])
+            mx, my = lat_lon_to_mercator(ev["lat"], ev["lon"])
+            new_places.append({
+                "id": ev["id"],
+                "name": ev["name"],
+                "lat": ev["lat"],
+                "lon": ev["lon"],
+                "rank": ev["rank"],
+                "type": ev["type"],
+                "mx": mx,
+                "my": my
+            })
+
+        return new_places
 
 if __name__ == "__main__":
     engine = VectorMapEngine()

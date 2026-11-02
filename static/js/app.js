@@ -2404,31 +2404,65 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function updateTrim(source) {
+  function updateTrim(source, handle) {
     const totalDist = (renderer.gpxData && renderer.gpxData.total_distance_km) ? renderer.gpxData.total_distance_km : 100.0;
 
     if (source === 'km') {
-      let kmIn = parseFloat(trimInKmInput.value) || 0;
-      let kmOut = parseFloat(trimOutKmInput.value) || totalDist;
-      if (kmIn < 0) kmIn = 0;
-      if (kmOut > totalDist) kmOut = totalDist;
-      if (kmIn >= kmOut) kmIn = Math.max(0, kmOut - 0.5);
+      let kmIn = parseFloat(trimInKmInput.value);
+      let kmOut = parseFloat(trimOutKmInput.value);
+      if (isNaN(kmIn)) kmIn = 0;
+      if (isNaN(kmOut)) kmOut = totalDist;
+
+      if (handle === 'in') {
+        if (kmIn >= kmOut) kmOut = Math.min(totalDist, kmIn + 0.5);
+      } else if (handle === 'out') {
+        if (kmOut <= kmIn) kmIn = Math.max(0, kmOut - 0.5);
+      } else {
+        if (kmIn >= kmOut) kmIn = Math.max(0, kmOut - 0.5);
+      }
+
+      kmIn = Math.max(0, Math.min(totalDist - 0.1, kmIn));
+      kmOut = Math.max(kmIn + 0.1, Math.min(totalDist, kmOut));
+
       const tIn = totalDist > 0 ? (kmIn / totalDist) : 0;
       const tOut = totalDist > 0 ? (kmOut / totalDist) : 1;
+
       trimInSlider.value = Math.round(tIn * 100);
       trimOutSlider.value = Math.round(tOut * 100);
+      trimInKmInput.value = kmIn.toFixed(1);
+      trimOutKmInput.value = kmOut.toFixed(1);
+
       renderer.trimIn = tIn;
       renderer.trimOut = tOut;
       renderer.trimInKm = Number(kmIn.toFixed(1));
       renderer.trimOutKm = Number(kmOut.toFixed(1));
     } else {
-      let tIn = parseInt(trimInSlider.value) / 100.0;
-      let tOut = parseInt(trimOutSlider.value) / 100.0;
-      if (tIn >= tOut) tIn = Math.max(0, tOut - 0.05);
+      let sIn = parseInt(trimInSlider.value);
+      let sOut = parseInt(trimOutSlider.value);
+
+      if (handle === 'in') {
+        if (sIn >= sOut) {
+          sOut = Math.min(100, sIn + 1);
+          trimOutSlider.value = sOut;
+        }
+      } else if (handle === 'out') {
+        if (sOut <= sIn) {
+          sIn = Math.max(0, sOut - 1);
+          trimInSlider.value = sIn;
+        }
+      } else {
+        if (sIn >= sOut) sIn = Math.max(0, sOut - 1);
+        trimInSlider.value = sIn;
+      }
+
+      const tIn = sIn / 100.0;
+      const tOut = sOut / 100.0;
+
       renderer.trimIn = tIn;
       renderer.trimOut = tOut;
       renderer.trimInKm = Number((tIn * totalDist).toFixed(1));
       renderer.trimOutKm = Number((tOut * totalDist).toFixed(1));
+
       if (trimInKmInput) trimInKmInput.value = renderer.trimInKm.toFixed(1);
       if (trimOutKmInput) trimOutKmInput.value = renderer.trimOutKm.toFixed(1);
     }
@@ -2437,10 +2471,10 @@ document.addEventListener('DOMContentLoaded', () => {
     scrubberSegmentRange.style.left = `${renderer.trimIn * 100}%`;
     scrubberSegmentRange.style.width = `${(renderer.trimOut - renderer.trimIn) * 100}%`;
   }
-  trimInSlider.addEventListener('input', () => updateTrim('slider'));
-  trimOutSlider.addEventListener('input', () => updateTrim('slider'));
-  if (trimInKmInput) trimInKmInput.addEventListener('input', () => updateTrim('km'));
-  if (trimOutKmInput) trimOutKmInput.addEventListener('input', () => updateTrim('km'));
+  trimInSlider.addEventListener('input', () => updateTrim('slider', 'in'));
+  trimOutSlider.addEventListener('input', () => updateTrim('slider', 'out'));
+  if (trimInKmInput) trimInKmInput.addEventListener('input', () => updateTrim('km', 'in'));
+  if (trimOutKmInput) trimOutKmInput.addEventListener('input', () => updateTrim('km', 'out'));
 
   // Custom Photo Backdrop for Transparent / HUD Modes
   const btnUploadBackdrop = document.getElementById('btnUploadBackdrop');
@@ -3058,11 +3092,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
       card.innerHTML = `
         <div class="waypoint-info" style="flex:1;">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-            <div class="waypoint-title-text" style="font-weight:700; color:#fff; font-size:12px;">${wp.title}</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+            <input type="text" class="wp-title-input" value="${wp.title}" style="font-weight:700; color:#fff; font-size:12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:3px; padding:2px 6px; flex:1;" title="Kliknutím upravte název bodu">
             <button class="waypoint-del-btn" title="Smazat bod" data-idx="${idx}" style="background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:16px; padding:0 4px; line-height:1;">&times;</button>
           </div>
-          <div class="waypoint-sub-text" style="font-size:10px; color:var(--text-muted); margin-top:2px;">${wp.subtitle || ''} • ${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : ((wp.progress * 100).toFixed(0) + '%')}</div>
+          <div style="display:flex; align-items:center; gap:6px; margin-top:3px;">
+            <input type="text" class="wp-sub-input" value="${wp.subtitle || ''}" placeholder="Podtitulek / popis..." style="font-size:10px; color:var(--text-muted); background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:2px; padding:1px 4px; flex:1;" title="Kliknutím upravte podtitulek">
+            <span style="font-size:10px; color:var(--text-dim); white-space:nowrap;">${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : ((wp.progress * 100).toFixed(0) + '%')}</span>
+          </div>
           
           <div style="display:flex; align-items:center; justify-content:space-between; margin-top:6px;">
             <label style="display:flex; align-items:center; gap:5px; font-size:10px; color:var(--text-dim); cursor:pointer;">
@@ -3092,6 +3129,32 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
       `;
+
+      // Title & Subtitle inline edit
+      const titleInput = card.querySelector('.wp-title-input');
+      if (titleInput) {
+        titleInput.addEventListener('change', (e) => {
+          e.stopPropagation();
+          const newTitle = e.target.value.trim() || wp.title;
+          wp.title = newTitle;
+          delete wp._cachedTrackIdx;
+          saveStateForUndo('Úprava názvu bodu: ' + newTitle);
+          saveCurrentProjectSettings();
+          renderTimelineWaypoints();
+          if (!state.isPlaying) renderer.render();
+        });
+      }
+
+      const subInput = card.querySelector('.wp-sub-input');
+      if (subInput) {
+        subInput.addEventListener('change', (e) => {
+          e.stopPropagation();
+          wp.subtitle = e.target.value.trim();
+          delete wp._cachedTrackIdx;
+          saveCurrentProjectSettings();
+          if (!state.isPlaying) renderer.render();
+        });
+      }
 
       // Toggle Timing Panel
       const timingBtn = card.querySelector('.wp-toggle-timing-btn');
@@ -4429,6 +4492,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div class="snapshot-card-actions">
           <button class="btn btn-secondary btn-restore-snapshot" style="padding:2px 8px; font-size:10px;" title="Aktivovat snímek">Nahrát</button>
+          <button class="btn btn-secondary btn-download-snapshot" style="padding:2px 6px; font-size:10px;" title="Stáhnout snímek jako samostatný .json soubor">📥</button>
           <button class="btn btn-secondary btn-rename-snapshot" style="padding:2px 6px; font-size:10px;" title="Přejmenovat snímek">✏️</button>
           <button class="btn btn-secondary btn-del-snapshot" style="padding:2px 6px; font-size:10px; color:var(--accent-danger);" title="Smazat">&times;</button>
         </div>
@@ -4438,6 +4502,11 @@ document.addEventListener('DOMContentLoaded', () => {
         saveStateForUndo('Aktivace snímku ' + sn.name);
         applySnapshotConfig(sn.data || sn.config);
         showToast(`✓ Snímek aktivován: ${sn.name}`);
+      });
+
+      item.querySelector('.btn-download-snapshot').addEventListener('click', () => {
+        window.location.href = `/api/projects/${state.currentProjectId}/snapshots/${sn.id}/download`;
+        showToast(`Stahuji snapshot: ${sn.name}`);
       });
 
       item.querySelector('.btn-rename-snapshot').addEventListener('click', async () => {
@@ -4495,6 +4564,36 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (err) {
         showToast('Chyba při ukládání snímku: ' + err.message, true);
       }
+    });
+  }
+
+  const btnImportSnapshotFile = document.getElementById('btnImportSnapshotFile');
+  const snapshotFileInput = document.getElementById('snapshotFileInput');
+  if (btnImportSnapshotFile && snapshotFileInput) {
+    btnImportSnapshotFile.addEventListener('click', () => snapshotFileInput.click());
+    snapshotFileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        const pId = state.currentProjectId || 'default';
+        const resp = await fetch(`/api/projects/${pId}/snapshots/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(json)
+        });
+        const res = await resp.json();
+        if (res.status === 'success') {
+          showToast(`✓ Snímek importován: ${res.snapshot.name}`);
+          loadSnapshots(pId);
+        } else {
+          showToast('Chyba při importu snímku', true);
+        }
+      } catch (err) {
+        showToast('Neplatný JSON soubor snímku: ' + err.message, true);
+      }
+      snapshotFileInput.value = '';
     });
   }
 
@@ -4781,6 +4880,14 @@ document.addEventListener('DOMContentLoaded', () => {
         items.push({ id: m.id, name: m.name, category: 'landmarks', typeName: 'Památka', icon: '🏰' });
       });
     }
+    // Waypoints
+    if (renderer.waypoints) {
+      renderer.waypoints.forEach((wp, idx) => {
+        const wpId = wp.id || `wp_${idx}_${(wp.title || '').toLowerCase().replace(/\s+/g, '_')}`;
+        if (!wp.id) wp.id = wpId;
+        items.push({ id: wpId, name: wp.title || `Bod ${idx + 1}`, category: 'waypoints', typeName: 'Bod na trase', icon: '🚩' });
+      });
+    }
     // Motorways
     if (layers.motorways) {
       layers.motorways.forEach(r => {
@@ -4861,6 +4968,50 @@ document.addEventListener('DOMContentLoaded', () => {
       populateLayersDrawer();
     });
   });
+
+  const btnExpandPlaces = document.getElementById('btnExpandPlaces');
+  if (btnExpandPlaces) {
+    btnExpandPlaces.addEventListener('click', async () => {
+      btnExpandPlaces.disabled = true;
+      btnExpandPlaces.textContent = '⏳ Načítám...';
+      showToast('Vyhledávám obce a osady v koridoru trasy přes Overpass API...');
+      try {
+        const resp = await fetch('/api/places/expand', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_id: state.currentProjectId || 'default',
+            gpx_filename: state.activeGpxName,
+            corridor_km: 25.0
+          })
+        });
+        const res = await resp.json();
+        if (res.status === 'success' && res.places) {
+          if (!renderer.vectorLayers) renderer.vectorLayers = {};
+          if (!renderer.vectorLayers.places) renderer.vectorLayers.places = [];
+          const existingIds = new Set(renderer.vectorLayers.places.map(p => p.id));
+          let added = 0;
+          for (const pl of res.places) {
+            if (!existingIds.has(pl.id)) {
+              existingIds.add(pl.id);
+              renderer.vectorLayers.places.push(pl);
+              added++;
+            }
+          }
+          populateLayersDrawer();
+          if (!state.isPlaying) renderer.render();
+          showToast(`✓ Úspěšně načteno ${added} nových obcí a osad v koridoru!`);
+        } else {
+          showToast('Nebyly nalezeny žádné nové obce v okolí.');
+        }
+      } catch (err) {
+        showToast('Chyba při stahování obcí: ' + err.message, true);
+      } finally {
+        btnExpandPlaces.disabled = false;
+        btnExpandPlaces.textContent = '➕ Načíst další obce';
+      }
+    });
+  }
 
   // ==================== 20. START & FINISH MARKER SETTINGS ====================
   const toggleStartMarker = document.getElementById('toggleStartMarker');
