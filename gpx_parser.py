@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 import math
 import os
+import uuid
 
 def haversine_km(lat1, lon1, lat2, lon2):
     R = 6371.0 # Earth's radius in km
@@ -236,6 +237,24 @@ def parse_gpx_file(filepath):
         'ele': round(raw_points[-1]['ele'], 1)
     })
     
+    # Merge with automatically detected geographic corridor landmarks (including Vyšehrad)
+    try:
+        from vector_map_engine import auto_detect_landmarks
+        detected_lms = auto_detect_landmarks(processed_points)
+        for lm in detected_lms:
+            suggested_waypoints.append({
+                'id': lm.get('id', 'wp_' + str(uuid.uuid4().hex[:6])),
+                'title': lm['title'],
+                'subtitle': lm['subtitle'],
+                'dist_km': lm.get('dist_km', 0.0),
+                'progress': lm.get('progress', 0.0),
+                'icon': lm.get('category', 'flag'),
+                'lat': lm.get('lat'),
+                'lon': lm.get('lon')
+            })
+    except Exception as e:
+        print(f"Landmark detection warning: {e}")
+
     # Sort waypoints by progress
     suggested_waypoints.sort(key=lambda w: w['progress'])
     

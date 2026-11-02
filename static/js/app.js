@@ -288,6 +288,12 @@ document.addEventListener('DOMContentLoaded', () => {
         colorTextVal.textContent = renderer.colors.text.toUpperCase();
         colorRiver.value = renderer.colors.river;
         colorRiverVal.textContent = renderer.colors.river.toUpperCase();
+        const colorUnitsEl = document.getElementById('colorUnits');
+        const colorUnitsValEl = document.getElementById('colorUnitsVal');
+        if (colorUnitsEl && renderer.colors.units) {
+          colorUnitsEl.value = renderer.colors.units;
+          if (colorUnitsValEl) colorUnitsValEl.textContent = renderer.colors.units.toUpperCase();
+        }
       }
 
       if (s.markerStyle) {
@@ -306,6 +312,57 @@ document.addEventListener('DOMContentLoaded', () => {
         renderer.hudScale = s.hudScale;
         hudScaleSlider.value = s.hudScale;
         hudScaleVal.textContent = `${s.hudScale.toFixed(2)}x`;
+      }
+      if (s.lod) {
+        renderer.lod = { ...renderer.lod, ...s.lod };
+        const lodToggleLakes = document.getElementById('lodToggleLakes');
+        const lodLakesOpacitySlider = document.getElementById('lodLakesOpacitySlider');
+        const lodLakesOpacityVal = document.getElementById('lodLakesOpacityVal');
+        const lodToggleRivers = document.getElementById('lodToggleRivers');
+        const lodRiversWidthSlider = document.getElementById('lodRiversWidthSlider');
+        const lodRiversWidthVal = document.getElementById('lodRiversWidthVal');
+        const lodToggleMotorways = document.getElementById('lodToggleMotorways');
+        const lodTogglePrimaryRoads = document.getElementById('lodTogglePrimaryRoads');
+        const lodToggleLocalRoads = document.getElementById('lodToggleLocalRoads');
+        const lodTogglePaths = document.getElementById('lodTogglePaths');
+        const lodToggleSettlements = document.getElementById('lodToggleSettlements');
+        if (lodToggleLakes) lodToggleLakes.checked = renderer.lod.lakes_dams;
+        if (lodLakesOpacitySlider) {
+          lodLakesOpacitySlider.value = Math.round((renderer.lod.lakesOpacity || 0.5) * 100);
+          if (lodLakesOpacityVal) lodLakesOpacityVal.textContent = `${Math.round((renderer.lod.lakesOpacity || 0.5) * 100)}%`;
+        }
+        if (lodToggleRivers) lodToggleRivers.checked = renderer.lod.rivers;
+        if (lodRiversWidthSlider) {
+          lodRiversWidthSlider.value = renderer.lod.riversWidth || 3.0;
+          if (lodRiversWidthVal) lodRiversWidthVal.textContent = `${(renderer.lod.riversWidth || 3.0).toFixed(1)}px`;
+        }
+        if (lodToggleMotorways) lodToggleMotorways.checked = renderer.lod.motorways;
+        if (lodTogglePrimaryRoads) lodTogglePrimaryRoads.checked = renderer.lod.primary_roads;
+        if (lodToggleLocalRoads) lodToggleLocalRoads.checked = renderer.lod.local_roads;
+        if (lodTogglePaths) lodTogglePaths.checked = renderer.lod.paths;
+        if (lodToggleSettlements) lodToggleSettlements.checked = renderer.lod.settlements;
+      }
+      if (s.spotlight) {
+        renderer.spotlight = { ...renderer.spotlight, ...s.spotlight };
+        const spotlightNameInput = document.getElementById('spotlightNameInput');
+        const spotlightLatInput = document.getElementById('spotlightLatInput');
+        const spotlightLonInput = document.getElementById('spotlightLonInput');
+        const spotlightZoomSlider = document.getElementById('spotlightZoomSlider');
+        const spotlightZoomVal = document.getElementById('spotlightZoomVal');
+        const toggleSpotlightRebound = document.getElementById('toggleSpotlightRebound');
+        const toggleSpotlightRoute = document.getElementById('toggleSpotlightRoute');
+        if (spotlightNameInput && renderer.spotlight.targetName) spotlightNameInput.value = renderer.spotlight.targetName;
+        if (spotlightLatInput && renderer.spotlight.targetLat) spotlightLatInput.value = renderer.spotlight.targetLat;
+        if (spotlightLonInput && renderer.spotlight.targetLon) spotlightLonInput.value = renderer.spotlight.targetLon;
+        if (spotlightZoomSlider && renderer.spotlight.zoomLevel) {
+          spotlightZoomSlider.value = renderer.spotlight.zoomLevel;
+          if (spotlightZoomVal) spotlightZoomVal.textContent = `${renderer.spotlight.zoomLevel.toFixed(1)}x`;
+        }
+        if (toggleSpotlightRebound) toggleSpotlightRebound.checked = renderer.spotlight.endingRebound !== false;
+        if (toggleSpotlightRoute) toggleSpotlightRoute.checked = renderer.spotlight.showRoute !== false;
+      }
+      if (s.zoomKeyframes && s.zoomKeyframes.length > 0) {
+        renderer.zoomKeyframes = s.zoomKeyframes;
       }
       if (s.layout) {
         for (const [k, v] of Object.entries(s.layout)) {
@@ -332,6 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
         speedKeyframes = [{ progress: 0.0, speed: 1.0 }, { progress: 1.0, speed: 1.0 }];
       }
       drawSpeedCurve();
+      drawZoomCurve();
 
       // Set Map Style
       setMapStyle(proj.map_style || 'panorama');
@@ -341,6 +399,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Check Mapy API Key
       loadApiKeyStatus();
+
+      // Load project snapshots and milestones
+      loadSnapshots(proj.id);
+      loadMilestones(proj.id);
+      loadTileStats();
 
       showToast(`Projekt aktivován: ${proj.name}`);
     } catch (err) {
@@ -982,6 +1045,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       updateTimeDisplay();
       drawSpeedCurve();
+      drawZoomCurve();
     }
 
     renderer.progress = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
@@ -1048,6 +1112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.currentTime = ratio * state.durationSec;
     updateTimeDisplay();
     drawSpeedCurve();
+    drawZoomCurve();
   }
 
   scrubberTrack.addEventListener('mousedown', (e) => {
@@ -1282,7 +1347,11 @@ document.addEventListener('DOMContentLoaded', () => {
               finishCityName: renderer.finishCityName,
               toggles: renderer.toggles,
               telemetry: renderer.telemetry,
-              layout: renderer.hudLayout
+              layout: renderer.hudLayout,
+              lod: renderer.lod,
+              spotlight: renderer.spotlight,
+              zoomKeyframes: renderer.zoomKeyframes,
+              backdropOpacity: renderer.backdropOpacity
             }
           })
         });
@@ -1399,6 +1468,12 @@ document.addEventListener('DOMContentLoaded', () => {
         colorRiver.value = color;
         colorRiverVal.textContent = color.toUpperCase();
         renderer.colors.river = color;
+      } else if (targetId === 'colorUnits') {
+        const colorUnitsEl = document.getElementById('colorUnits');
+        const colorUnitsValEl = document.getElementById('colorUnitsVal');
+        if (colorUnitsEl) colorUnitsEl.value = color;
+        if (colorUnitsValEl) colorUnitsValEl.textContent = color.toUpperCase();
+        renderer.colors.units = color;
       }
 
       parentPreset.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
@@ -1429,6 +1504,16 @@ document.addEventListener('DOMContentLoaded', () => {
     saveCurrentProjectSettings();
   });
 
+  const colorUnitsInput = document.getElementById('colorUnits');
+  const colorUnitsValSpan = document.getElementById('colorUnitsVal');
+  if (colorUnitsInput) {
+    colorUnitsInput.addEventListener('input', (e) => {
+      renderer.colors.units = e.target.value;
+      if (colorUnitsValSpan) colorUnitsValSpan.textContent = e.target.value.toUpperCase();
+      saveCurrentProjectSettings();
+    });
+  }
+
   markerStyleSelect.addEventListener('change', (e) => renderer.markerStyle = e.target.value);
   startCityInput.addEventListener('input', (e) => renderer.startCityName = e.target.value);
   finishCityInput.addEventListener('input', (e) => renderer.finishCityName = e.target.value);
@@ -1449,6 +1534,16 @@ document.addEventListener('DOMContentLoaded', () => {
     glowVal.textContent = labels[parseInt(e.target.value)];
   });
 
+  // Double click on all range sliders resets to default value!
+  document.querySelectorAll('input[type="range"].form-range').forEach(slider => {
+    slider.addEventListener('dblclick', (e) => {
+      e.target.value = e.target.defaultValue;
+      e.target.dispatchEvent(new Event('input', { bubbles: true }));
+      e.target.dispatchEvent(new Event('change', { bubbles: true }));
+      showToast(`Hodnota resetována na výchozí: ${e.target.defaultValue}`);
+    });
+  });
+
   // Toggles
   toggleMiniMap.addEventListener('change', (e) => renderer.toggles.miniMap = e.target.checked);
   toggleElevation.addEventListener('change', (e) => renderer.toggles.elevation = e.target.checked);
@@ -1465,18 +1560,197 @@ document.addEventListener('DOMContentLoaded', () => {
   clockStartTime.addEventListener('input', (e) => renderer.clockConfig.startTime = e.target.value);
   clockFinishTime.addEventListener('input', (e) => renderer.clockConfig.finishTime = e.target.value);
 
-  function updateTrim() {
+  // Kilometer-based Trim synchronization
+  const trimInKmInput = document.getElementById('trimInKmInput');
+  const trimOutKmInput = document.getElementById('trimOutKmInput');
+
+  function updateTrim(source) {
+    const totalDist = (renderer.gpxData && renderer.gpxData.total_distance_km) ? renderer.gpxData.total_distance_km : 100.0;
+
+    if (source === 'km') {
+      let kmIn = parseFloat(trimInKmInput.value) || 0;
+      let kmOut = parseFloat(trimOutKmInput.value) || totalDist;
+      if (kmIn >= kmOut) kmIn = Math.max(0, kmOut - 1.0);
+      trimInSlider.value = Math.round((kmIn / totalDist) * 100);
+      trimOutSlider.value = Math.round((kmOut / totalDist) * 100);
+    }
+
     let tIn = parseInt(trimInSlider.value) / 100.0;
     let tOut = parseInt(trimOutSlider.value) / 100.0;
     if (tIn >= tOut) tIn = tOut - 0.05;
     renderer.trimIn = tIn;
     renderer.trimOut = tOut;
-    trimVal.textContent = `${Math.round(tIn * 100)}% — ${Math.round(tOut * 100)}%`;
+    renderer.trimInKm = Number((tIn * totalDist).toFixed(1));
+    renderer.trimOutKm = Number((tOut * totalDist).toFixed(1));
+
+    if (source !== 'km') {
+      if (trimInKmInput) trimInKmInput.value = renderer.trimInKm.toFixed(1);
+      if (trimOutKmInput) trimOutKmInput.value = renderer.trimOutKm.toFixed(1);
+    }
+
+    trimVal.textContent = `${Math.round(tIn * 100)}% (${renderer.trimInKm.toFixed(1)} km) — ${Math.round(tOut * 100)}% (${renderer.trimOutKm.toFixed(1)} km)`;
     scrubberSegmentRange.style.left = `${tIn * 100}%`;
     scrubberSegmentRange.style.width = `${(tOut - tIn) * 100}%`;
   }
-  trimInSlider.addEventListener('input', updateTrim);
-  trimOutSlider.addEventListener('input', updateTrim);
+  trimInSlider.addEventListener('input', () => updateTrim('slider'));
+  trimOutSlider.addEventListener('input', () => updateTrim('slider'));
+  if (trimInKmInput) trimInKmInput.addEventListener('input', () => updateTrim('km'));
+  if (trimOutKmInput) trimOutKmInput.addEventListener('input', () => updateTrim('km'));
+
+  // Custom Photo Backdrop for Transparent / HUD Modes
+  const btnUploadBackdrop = document.getElementById('btnUploadBackdrop');
+  const backdropFileInput = document.getElementById('backdropFileInput');
+  const btnClearBackdrop = document.getElementById('btnClearBackdrop');
+  const backdropOpacitySlider = document.getElementById('backdropOpacitySlider');
+  const backdropOpacityVal = document.getElementById('backdropOpacityVal');
+
+  if (btnUploadBackdrop && backdropFileInput) {
+    btnUploadBackdrop.addEventListener('click', () => backdropFileInput.click());
+    backdropFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          renderer.backdropImage = img;
+          renderer.backdropLoaded = true;
+          if (btnClearBackdrop) btnClearBackdrop.style.display = 'inline-flex';
+          showToast(`Foto podklad nahrán: ${file.name}`);
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  if (btnClearBackdrop) {
+    btnClearBackdrop.addEventListener('click', () => {
+      renderer.backdropImage = null;
+      renderer.backdropLoaded = false;
+      btnClearBackdrop.style.display = 'none';
+      if (backdropFileInput) backdropFileInput.value = '';
+      showToast('Foto podklad byl odstraněn');
+    });
+  }
+  if (backdropOpacitySlider) {
+    backdropOpacitySlider.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value) / 100.0;
+      renderer.backdropOpacity = val;
+      if (backdropOpacityVal) backdropOpacityVal.textContent = `${e.target.value}%`;
+      saveCurrentProjectSettings();
+    });
+  }
+
+  // LOD Layers Configuration
+  const lodToggleLakes = document.getElementById('lodToggleLakes');
+  const lodLakesOpacitySlider = document.getElementById('lodLakesOpacitySlider');
+  const lodLakesOpacityVal = document.getElementById('lodLakesOpacityVal');
+  const lodToggleRivers = document.getElementById('lodToggleRivers');
+  const lodRiversWidthSlider = document.getElementById('lodRiversWidthSlider');
+  const lodRiversWidthVal = document.getElementById('lodRiversWidthVal');
+  const lodToggleMotorways = document.getElementById('lodToggleMotorways');
+  const lodTogglePrimaryRoads = document.getElementById('lodTogglePrimaryRoads');
+  const lodToggleLocalRoads = document.getElementById('lodToggleLocalRoads');
+  const lodTogglePaths = document.getElementById('lodTogglePaths');
+  const lodToggleSettlements = document.getElementById('lodToggleSettlements');
+
+  if (lodToggleLakes) {
+    lodToggleLakes.addEventListener('change', (e) => {
+      renderer.lod.lakes_dams = e.target.checked;
+      saveCurrentProjectSettings();
+    });
+  }
+  if (lodLakesOpacitySlider) {
+    lodLakesOpacitySlider.addEventListener('input', (e) => {
+      renderer.lod.lakesOpacity = parseInt(e.target.value) / 100.0;
+      if (lodLakesOpacityVal) lodLakesOpacityVal.textContent = `${e.target.value}%`;
+      saveCurrentProjectSettings();
+    });
+  }
+  if (lodToggleRivers) {
+    lodToggleRivers.addEventListener('change', (e) => {
+      renderer.lod.rivers = e.target.checked;
+      saveCurrentProjectSettings();
+    });
+  }
+  if (lodRiversWidthSlider) {
+    lodRiversWidthSlider.addEventListener('input', (e) => {
+      renderer.lod.riversWidth = parseFloat(e.target.value);
+      if (lodRiversWidthVal) lodRiversWidthVal.textContent = `${parseFloat(e.target.value).toFixed(1)}px`;
+      saveCurrentProjectSettings();
+    });
+  }
+  if (lodToggleMotorways) {
+    lodToggleMotorways.addEventListener('change', (e) => {
+      renderer.lod.motorways = e.target.checked;
+      saveCurrentProjectSettings();
+    });
+  }
+  if (lodTogglePrimaryRoads) {
+    lodTogglePrimaryRoads.addEventListener('change', (e) => {
+      renderer.lod.primary_roads = e.target.checked;
+      saveCurrentProjectSettings();
+    });
+  }
+  if (lodToggleLocalRoads) {
+    lodToggleLocalRoads.addEventListener('change', (e) => {
+      renderer.lod.local_roads = e.target.checked;
+      saveCurrentProjectSettings();
+    });
+  }
+  if (lodTogglePaths) {
+    lodTogglePaths.addEventListener('change', (e) => {
+      renderer.lod.paths = e.target.checked;
+      saveCurrentProjectSettings();
+    });
+  }
+  if (lodToggleSettlements) {
+    lodToggleSettlements.addEventListener('change', (e) => {
+      renderer.lod.settlements = e.target.checked;
+      saveCurrentProjectSettings();
+    });
+  }
+
+  // Whole Viewport Zoom & Pan Controls
+  const viewportZoomSlider = document.getElementById('viewportZoomSlider');
+  const btnZoomInView = document.getElementById('btnZoomInView');
+  const btnZoomOutView = document.getElementById('btnZoomOutView');
+  const btnResetViewportZoom = document.getElementById('btnResetViewportZoom');
+  const btnFitViewportRoute = document.getElementById('btnFitViewportRoute');
+
+  if (viewportZoomSlider) {
+    viewportZoomSlider.addEventListener('input', (e) => {
+      renderer.viewportZoom = parseFloat(e.target.value);
+    });
+  }
+  if (btnZoomInView) {
+    btnZoomInView.addEventListener('click', () => {
+      renderer.viewportZoom = Math.min(4.0, (renderer.viewportZoom || 1.0) * 1.25);
+      if (viewportZoomSlider) viewportZoomSlider.value = renderer.viewportZoom.toFixed(2);
+    });
+  }
+  if (btnZoomOutView) {
+    btnZoomOutView.addEventListener('click', () => {
+      renderer.viewportZoom = Math.max(0.2, (renderer.viewportZoom || 1.0) / 1.25);
+      if (viewportZoomSlider) viewportZoomSlider.value = renderer.viewportZoom.toFixed(2);
+    });
+  }
+  if (btnResetViewportZoom) {
+    btnResetViewportZoom.addEventListener('click', () => {
+      renderer.viewportZoom = 1.0;
+      renderer.viewportPan = { x: 0, y: 0 };
+      if (viewportZoomSlider) viewportZoomSlider.value = 1.0;
+      showToast('Pohled resetován na 100%');
+    });
+  }
+  if (btnFitViewportRoute) {
+    btnFitViewportRoute.addEventListener('click', () => {
+      renderer.viewportZoom = 1.0;
+      renderer.viewportPan = { x: 0, y: 0 };
+      if (viewportZoomSlider) viewportZoomSlider.value = 1.0;
+      showToast('Trasa přizpůsobena do okna');
+    });
+  }
 
   // Telemetry Configuration
   teleSlot1Type.addEventListener('change', (e) => renderer.telemetry.slot1.type = e.target.value);
@@ -1511,6 +1785,41 @@ document.addEventListener('DOMContentLoaded', () => {
     renderer.calibration.offsetY = parseInt(e.target.value);
     calibOffsetYVal.textContent = e.target.value;
     renderer.computeCalibrationMatrix();
+  });
+
+  // Spotlight Settings
+  const spotlightNameInput = document.getElementById('spotlightNameInput');
+  const spotlightLatInput = document.getElementById('spotlightLatInput');
+  const spotlightLonInput = document.getElementById('spotlightLonInput');
+  const spotlightZoomSlider = document.getElementById('spotlightZoomSlider');
+  const spotlightZoomVal = document.getElementById('spotlightZoomVal');
+  const toggleSpotlightRebound = document.getElementById('toggleSpotlightRebound');
+  const toggleSpotlightRoute = document.getElementById('toggleSpotlightRoute');
+
+  if (spotlightNameInput) spotlightNameInput.addEventListener('input', (e) => {
+    renderer.spotlight.targetName = e.target.value;
+    saveCurrentProjectSettings();
+  });
+  if (spotlightLatInput) spotlightLatInput.addEventListener('input', (e) => {
+    renderer.spotlight.targetLat = parseFloat(e.target.value) || 50.068281;
+    saveCurrentProjectSettings();
+  });
+  if (spotlightLonInput) spotlightLonInput.addEventListener('input', (e) => {
+    renderer.spotlight.targetLon = parseFloat(e.target.value) || 14.424340;
+    saveCurrentProjectSettings();
+  });
+  if (spotlightZoomSlider) spotlightZoomSlider.addEventListener('input', (e) => {
+    renderer.spotlight.zoomLevel = parseFloat(e.target.value);
+    if (spotlightZoomVal) spotlightZoomVal.textContent = `${parseFloat(e.target.value).toFixed(1)}x`;
+    saveCurrentProjectSettings();
+  });
+  if (toggleSpotlightRebound) toggleSpotlightRebound.addEventListener('change', (e) => {
+    renderer.spotlight.endingRebound = e.target.checked;
+    saveCurrentProjectSettings();
+  });
+  if (toggleSpotlightRoute) toggleSpotlightRoute.addEventListener('change', (e) => {
+    renderer.spotlight.showRoute = e.target.checked;
+    saveCurrentProjectSettings();
   });
 
   // ==================== 10. PANORAMA GENERATOR MODAL ====================
@@ -1757,6 +2066,18 @@ document.addEventListener('DOMContentLoaded', () => {
       offRenderer.followHeading = renderer.followHeading;
       offRenderer.spotlight = { ...renderer.spotlight };
       offRenderer.calibration = { ...renderer.calibration };
+      offRenderer.tileCache = renderer.tileCache;
+      offRenderer.tileProvider = renderer.tileProvider;
+      offRenderer.backdropImage = renderer.backdropImage;
+      offRenderer.backdropLoaded = renderer.backdropLoaded;
+      offRenderer.backdropOpacity = renderer.backdropOpacity;
+      offRenderer.lod = JSON.parse(JSON.stringify(renderer.lod));
+      offRenderer.zoomKeyframes = JSON.parse(JSON.stringify(renderer.zoomKeyframes));
+      offRenderer.timeMilestones = JSON.parse(JSON.stringify(renderer.timeMilestones));
+      offRenderer.trimInKm = renderer.trimInKm;
+      offRenderer.trimOutKm = renderer.trimOutKm;
+      offRenderer.viewportZoom = renderer.viewportZoom;
+      offRenderer.viewportPan = { ...renderer.viewportPan };
 
       const batchSize = 10;
       let frameBatch = [];
@@ -1882,7 +2203,485 @@ document.addEventListener('DOMContentLoaded', () => {
       fusionCodeBox.textContent = 'Chyba při generování makra: ' + err.message;
     }
   });
-  btnCloseFusionModal.addEventListener('click', () => fusionModal.style.display = 'none');
+  // ==================== 13. ZOOM RAMP BEZIER GRAPH ====================
+  const btnToggleZoomRamp = document.getElementById('btnToggleZoomRamp');
+  const zoomRampPanel = document.getElementById('zoomRampPanel');
+  const zoomCurveCanvas = document.getElementById('zoomCurveCanvas');
+  const btnZoomStartOverview = document.getElementById('btnZoomStartOverview');
+  const btnZoomOverviewFinish = document.getElementById('btnZoomOverviewFinish');
+  const btnZoomPeak = document.getElementById('btnZoomPeak');
+  const btnZoomRebound = document.getElementById('btnZoomRebound');
+
+  let selectedZoomKnot = null;
+  let isDraggingZoomKnot = false;
+
+  if (btnToggleZoomRamp && zoomRampPanel) {
+    btnToggleZoomRamp.addEventListener('click', () => {
+      const isOpen = zoomRampPanel.style.display !== 'none';
+      zoomRampPanel.style.display = isOpen ? 'none' : 'block';
+      btnToggleZoomRamp.classList.toggle('active', !isOpen);
+      if (!isOpen) drawZoomCurve();
+    });
+  }
+
+  function drawZoomCurve() {
+    if (!zoomCurveCanvas) return;
+    const ctx = zoomCurveCanvas.getContext('2d');
+    const w = zoomCurveCanvas.width;
+    const h = zoomCurveCanvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const minZ = 0.5;
+    const maxZ = 5.0;
+    const toY = (zVal) => h - ((zVal - minZ) / (maxZ - minZ)) * (h - 20) - 10;
+    const toX = (pVal) => pVal * w;
+
+    // Grid baselines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = 1;
+    [1.0, 2.0, 3.0, 4.0].forEach(zVal => {
+      const y = toY(zVal);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+
+      ctx.fillStyle = zVal === 2.0 ? '#00f0ff' : 'var(--text-dim)';
+      ctx.font = '600 9.5px JetBrains Mono';
+      ctx.fillText(`${zVal.toFixed(1)}x`, 6, y - 3);
+    });
+
+    // Playhead cursor
+    const curP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+    const curX = toX(curP);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(curX, 0);
+    ctx.lineTo(curX, h);
+    ctx.stroke();
+
+    // Smooth curve
+    ctx.beginPath();
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2.5;
+    for (let px = 0; px <= w; px += 4) {
+      const p = px / w;
+      const zm = renderer.getZoomAtProgress(p);
+      const py = toY(zm);
+      if (px === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+
+    // Knots
+    const kfs = renderer.zoomKeyframes || [];
+    kfs.forEach(k => {
+      const kx = toX(k.progress);
+      const ky = toY(k.zoom);
+
+      ctx.fillStyle = '#00f0ff';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(kx, ky, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 9.5px JetBrains Mono';
+      ctx.fillText(`${k.zoom.toFixed(1)}x`, kx - 10, ky - 9);
+    });
+  }
+
+  if (zoomCurveCanvas) {
+    zoomCurveCanvas.addEventListener('mousedown', (e) => {
+      const rect = zoomCurveCanvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (zoomCurveCanvas.width / rect.width);
+      const my = (e.clientY - rect.top) * (zoomCurveCanvas.height / rect.height);
+
+      const minZ = 0.5;
+      const maxZ = 5.0;
+      const h = zoomCurveCanvas.height;
+      const toY = (zVal) => h - ((zVal - minZ) / (maxZ - minZ)) * (h - 20) - 10;
+      const toX = (pVal) => pVal * zoomCurveCanvas.width;
+
+      let hitIdx = -1;
+      (renderer.zoomKeyframes || []).forEach((k, idx) => {
+        const kx = toX(k.progress);
+        const ky = toY(k.zoom);
+        if (Math.hypot(mx - kx, my - ky) < 12) hitIdx = idx;
+      });
+
+      if (hitIdx >= 0) {
+        selectedZoomKnot = hitIdx;
+        isDraggingZoomKnot = true;
+      } else {
+        const newP = Math.max(0.02, Math.min(0.98, mx / zoomCurveCanvas.width));
+        const newZ = Math.max(0.5, Math.min(5.0, minZ + ((h - 10 - my) / (h - 20)) * (maxZ - minZ)));
+        renderer.zoomKeyframes.push({ progress: newP, zoom: Number(newZ.toFixed(2)) });
+        renderer.zoomKeyframes.sort((a, b) => a.progress - b.progress);
+        drawZoomCurve();
+        saveCurrentProjectSettings();
+      }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDraggingZoomKnot || selectedZoomKnot === null || !zoomCurveCanvas) return;
+      const rect = zoomCurveCanvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (zoomCurveCanvas.width / rect.width);
+      const my = (e.clientY - rect.top) * (zoomCurveCanvas.height / rect.height);
+      const minZ = 0.5;
+      const maxZ = 5.0;
+      const h = zoomCurveCanvas.height;
+
+      const newZ = Math.max(0.5, Math.min(5.0, minZ + ((h - 10 - my) / (h - 20)) * (maxZ - minZ)));
+      renderer.zoomKeyframes[selectedZoomKnot].zoom = Number(newZ.toFixed(2));
+
+      if (selectedZoomKnot > 0 && selectedZoomKnot < renderer.zoomKeyframes.length - 1) {
+        renderer.zoomKeyframes[selectedZoomKnot].progress = Math.max(0.01, Math.min(0.99, mx / zoomCurveCanvas.width));
+      }
+      renderer.zoomKeyframes.sort((a, b) => a.progress - b.progress);
+      drawZoomCurve();
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDraggingZoomKnot) {
+        isDraggingZoomKnot = false;
+        selectedZoomKnot = null;
+        saveCurrentProjectSettings();
+      }
+    });
+  }
+
+  // Zoom Presets
+  if (btnZoomStartOverview) {
+    btnZoomStartOverview.addEventListener('click', () => {
+      renderer.zoomKeyframes = [
+        { progress: 0.0, zoom: 4.2 },
+        { progress: 0.35, zoom: 2.2 },
+        { progress: 1.0, zoom: 1.0 }
+      ];
+      drawZoomCurve();
+      saveCurrentProjectSettings();
+      showToast('Záběr: Start detail ➔ Široký celek');
+    });
+  }
+  if (btnZoomOverviewFinish) {
+    btnZoomOverviewFinish.addEventListener('click', () => {
+      renderer.zoomKeyframes = [
+        { progress: 0.0, zoom: 1.0 },
+        { progress: 0.65, zoom: 2.2 },
+        { progress: 1.0, zoom: 4.2 }
+      ];
+      drawZoomCurve();
+      saveCurrentProjectSettings();
+      showToast('Záběr: Celek ➔ Cílový detail');
+    });
+  }
+  if (btnZoomPeak) {
+    btnZoomPeak.addEventListener('click', () => {
+      renderer.zoomKeyframes = [
+        { progress: 0.0, zoom: 1.5 },
+        { progress: 0.5, zoom: 3.8 },
+        { progress: 1.0, zoom: 1.5 }
+      ];
+      drawZoomCurve();
+      saveCurrentProjectSettings();
+      showToast('Záběr: Přiblížení na vrchol');
+    });
+  }
+  if (btnZoomRebound) {
+    btnZoomRebound.addEventListener('click', () => {
+      renderer.zoomKeyframes = [
+        { progress: 0.0, zoom: 1.2 },
+        { progress: 0.85, zoom: 3.6 },
+        { progress: 1.0, zoom: 2.8 }
+      ];
+      drawZoomCurve();
+      saveCurrentProjectSettings();
+      showToast('Záběr: Odraz / Rebound');
+    });
+  }
+
+  // ==================== 14. SNAPSHOTS MANAGEMENT ====================
+  const snapshotNameInput = document.getElementById('snapshotNameInput');
+  const btnSaveSnapshot = document.getElementById('btnSaveSnapshot');
+  const snapshotsListContainer = document.getElementById('snapshotsListContainer');
+
+  async function loadSnapshots(projectId) {
+    if (!projectId || !snapshotsListContainer) return;
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/snapshots`);
+      const data = await resp.json();
+      renderSnapshotsList(data.snapshots || []);
+    } catch (err) {
+      console.warn('Error loading snapshots:', err);
+    }
+  }
+
+  function renderSnapshotsList(snapshots) {
+    if (!snapshotsListContainer) return;
+    snapshotsListContainer.innerHTML = '';
+    if (!snapshots || snapshots.length === 0) {
+      snapshotsListContainer.innerHTML = '<div style="font-size:10px; color:var(--text-dim); padding:4px 0;">Zatím žádné uložené snímky.</div>';
+      return;
+    }
+
+    snapshots.forEach(sn => {
+      const item = document.createElement('div');
+      item.className = 'snapshot-card-item';
+      const timeStr = sn.created_at ? new Date(sn.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      item.innerHTML = `
+        <div class="snapshot-card-info">
+          <div class="snapshot-card-title">${sn.name}</div>
+          <div class="snapshot-card-meta">${timeStr}</div>
+        </div>
+        <div class="snapshot-card-actions">
+          <button class="btn btn-secondary btn-restore-snapshot" style="padding:2px 8px; font-size:10px;" title="Aktivovat snímek">Nahrát</button>
+          <button class="btn btn-secondary btn-del-snapshot" style="padding:2px 6px; font-size:10px; color:var(--accent-danger);" title="Smazat">&times;</button>
+        </div>
+      `;
+
+      item.querySelector('.btn-restore-snapshot').addEventListener('click', () => {
+        applySnapshotConfig(sn.config);
+        showToast(`Snímek aktivován: ${sn.name}`);
+      });
+
+      item.querySelector('.btn-del-snapshot').addEventListener('click', async () => {
+        try {
+          await fetch(`/api/projects/${state.currentProjectId}/snapshots/${sn.id}`, { method: 'DELETE' });
+          loadSnapshots(state.currentProjectId);
+          showToast(`Snímek smazán: ${sn.name}`);
+        } catch (err) {
+          console.error(err);
+        }
+      });
+
+      snapshotsListContainer.appendChild(item);
+    });
+  }
+
+  function applySnapshotConfig(cfg) {
+    if (!cfg) return;
+    if (cfg.colors) {
+      renderer.colors = { ...renderer.colors, ...cfg.colors };
+      colorPath.value = renderer.colors.path;
+      colorPathVal.textContent = renderer.colors.path.toUpperCase();
+      colorElevation.value = renderer.colors.elevation;
+      colorElevationVal.textContent = renderer.colors.elevation.toUpperCase();
+      colorText.value = renderer.colors.text;
+      colorTextVal.textContent = renderer.colors.text.toUpperCase();
+      colorRiver.value = renderer.colors.river;
+      colorRiverVal.textContent = renderer.colors.river.toUpperCase();
+      const colorUnitsEl = document.getElementById('colorUnits');
+      const colorUnitsValEl = document.getElementById('colorUnitsVal');
+      if (colorUnitsEl && renderer.colors.units) {
+        colorUnitsEl.value = renderer.colors.units;
+        if (colorUnitsValEl) colorUnitsValEl.textContent = renderer.colors.units.toUpperCase();
+      }
+    }
+    if (cfg.hudScale) {
+      renderer.hudScale = cfg.hudScale;
+      hudScaleSlider.value = cfg.hudScale;
+      hudScaleVal.textContent = `${cfg.hudScale.toFixed(2)}x`;
+    }
+    if (cfg.layout) {
+      renderer.hudLayout = { ...renderer.hudLayout, ...cfg.layout };
+    }
+    if (cfg.toggles) {
+      renderer.toggles = { ...renderer.toggles, ...cfg.toggles };
+    }
+    if (cfg.lod) {
+      renderer.lod = { ...renderer.lod, ...cfg.lod };
+    }
+    if (cfg.animationMode) {
+      renderer.animationMode = cfg.animationMode;
+      animModeSelect.value = cfg.animationMode;
+    }
+    if (cfg.viewportZoom) {
+      renderer.viewportZoom = cfg.viewportZoom;
+      if (viewportZoomSlider) viewportZoomSlider.value = cfg.viewportZoom;
+    }
+    if (cfg.zoomKeyframes) {
+      renderer.zoomKeyframes = cfg.zoomKeyframes;
+      drawZoomCurve();
+    }
+  }
+
+  if (btnSaveSnapshot && snapshotNameInput) {
+    btnSaveSnapshot.addEventListener('click', async () => {
+      const name = snapshotNameInput.value.trim() || `Snímek ${new Date().toLocaleTimeString()}`;
+      if (!state.currentProjectId) return;
+      const config = {
+        colors: renderer.colors,
+        hudScale: renderer.hudScale,
+        layout: renderer.hudLayout,
+        toggles: renderer.toggles,
+        lod: renderer.lod,
+        animationMode: renderer.animationMode,
+        viewportZoom: renderer.viewportZoom || 1.0,
+        zoomKeyframes: renderer.zoomKeyframes
+      };
+      try {
+        await fetch(`/api/projects/${state.currentProjectId}/snapshots`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, config })
+        });
+        snapshotNameInput.value = '';
+        loadSnapshots(state.currentProjectId);
+        showToast(`✓ Snímek uložen: ${name}`);
+      } catch (err) {
+        showToast('Chyba při ukládání snímku: ' + err.message, true);
+      }
+    });
+  }
+
+  // ==================== 15. TIME MILESTONES MANAGEMENT ====================
+  const milestoneKmInput = document.getElementById('milestoneKmInput');
+  const milestoneTimeInput = document.getElementById('milestoneTimeInput');
+  const milestoneLabelInput = document.getElementById('milestoneLabelInput');
+  const btnAddMilestone = document.getElementById('btnAddMilestone');
+  const milestonesListContainer = document.getElementById('milestonesListContainer');
+
+  async function loadMilestones(projectId) {
+    if (!projectId || !milestonesListContainer) return;
+    try {
+      const resp = await fetch(`/api/projects/${projectId}/milestones`);
+      const data = await resp.json();
+      const list = data.milestones || [];
+      renderer.timeMilestones = list;
+      renderMilestonesList(list);
+    } catch (err) {
+      console.warn('Error loading milestones:', err);
+    }
+  }
+
+  function renderMilestonesList(milestones) {
+    if (!milestonesListContainer) return;
+    milestonesListContainer.innerHTML = '';
+    if (!milestones || milestones.length === 0) {
+      milestonesListContainer.innerHTML = '<div style="font-size:10px; color:var(--text-dim); padding:4px 0;">Zatím žádné časové milníky.</div>';
+      return;
+    }
+
+    milestones.forEach(m => {
+      const item = document.createElement('div');
+      item.className = 'milestone-card-item';
+      item.innerHTML = `
+        <div class="milestone-card-info">
+          <div class="milestone-card-title">${m.label || 'Milník'}</div>
+          <div class="milestone-card-meta">${Number(m.km).toFixed(1)} km ➔ ${m.clock_time}</div>
+        </div>
+        <div class="milestone-card-actions">
+          <button class="btn btn-secondary btn-del-milestone" style="padding:2px 6px; font-size:10px; color:var(--accent-danger);" title="Smazat">&times;</button>
+        </div>
+      `;
+
+      item.querySelector('.btn-del-milestone').addEventListener('click', async () => {
+        try {
+          await fetch(`/api/projects/${state.currentProjectId}/milestones/${m.id}`, { method: 'DELETE' });
+          loadMilestones(state.currentProjectId);
+          showToast(`Milník smazán: ${m.label || m.km + ' km'}`);
+        } catch (err) {
+          console.error(err);
+        }
+      });
+
+      milestonesListContainer.appendChild(item);
+    });
+  }
+
+  if (btnAddMilestone && milestoneKmInput && milestoneTimeInput) {
+    btnAddMilestone.addEventListener('click', async () => {
+      const km = parseFloat(milestoneKmInput.value);
+      if (isNaN(km)) {
+        showToast('Zadejte platný kilometr', true);
+        return;
+      }
+      const clock_time = milestoneTimeInput.value || '10:00';
+      const label = (milestoneLabelInput ? milestoneLabelInput.value.trim() : '') || `${km.toFixed(1)} km`;
+
+      try {
+        await fetch(`/api/projects/${state.currentProjectId}/milestones`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ km, clock_time, label })
+        });
+        if (milestoneKmInput) milestoneKmInput.value = '';
+        if (milestoneLabelInput) milestoneLabelInput.value = '';
+        loadMilestones(state.currentProjectId);
+        showToast(`✓ Milník přidán: ${label} (${clock_time})`);
+      } catch (err) {
+        showToast('Chyba při ukládání milníku: ' + err.message, true);
+      }
+    });
+  }
+
+  // ==================== 16. TILE CACHE STATS & CLEAR ====================
+  const btnClearTileCache = document.getElementById('btnClearTileCache');
+  const tileCacheStatus = document.getElementById('tileCacheStatus');
+
+  async function loadTileStats() {
+    if (!tileCacheStatus) return;
+    try {
+      const resp = await fetch('/api/tiles/stats');
+      const data = await resp.json();
+      tileCacheStatus.textContent = `Dlaždice: ${data.tiles || 0} (${data.size_mb || 0} MB)`;
+    } catch (err) {
+      console.warn('Tile stats error:', err);
+    }
+  }
+
+  if (btnClearTileCache) {
+    btnClearTileCache.addEventListener('click', async () => {
+      try {
+        await fetch('/api/tiles/clear', { method: 'POST' });
+        renderer.tileCache.clear();
+        loadTileStats();
+        showToast('Mezipaměť mapových dlaždic byla vyčištěna');
+      } catch (err) {
+        showToast('Chyba při mazání cache: ' + err.message, true);
+      }
+    });
+  }
+
+  // ==================== 17. ON-CANVAS TOGGLE & KEYBOARD SHORTCUTS ====================
+  canvas.addEventListener('dblclick', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const cx = (e.clientX - rect.left) * scaleX;
+    const cy = (e.clientY - rect.top) * scaleY;
+
+    const keys = ['banner', 'telemetry', 'elevation', 'minimap', 'clock'];
+    for (const k of keys) {
+      const el = renderer.hudLayout[k];
+      if (!el) continue;
+      const s = renderer.hudScale * el.scale;
+      if (cx >= el.x && cx <= el.x + el.w * s && cy >= el.y && cy <= el.y + el.h * s) {
+        el.visible = !el.visible;
+        showToast(`Prvek ${k === 'banner' ? 'Záhlaví trasy' : k} ${el.visible ? 'zapnut' : 'skryt'}`);
+        saveCurrentProjectSettings();
+        break;
+      }
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+    if ((e.key === 'Delete' || e.key === 'Backspace') && renderer.selectedElement) {
+      const el = renderer.hudLayout[renderer.selectedElement];
+      if (el) {
+        el.visible = false;
+        showToast(`Prvek ${renderer.selectedElement} byl skryt`);
+        renderer.selectedElement = null;
+        saveCurrentProjectSettings();
+      }
+    }
+  });
 
   function showToast(msg, isError = false) {
     let toast = document.getElementById('studioToast');

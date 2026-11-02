@@ -42,6 +42,11 @@
         ⚡ Speed Ramp
       </button>
 
+      <!-- Zoom Ramp Panel Toggle -->
+      <button class="tool-btn" id="btnToggleZoomRamp" title="Otevřít / Zavřít Bezier Zoom Ramp křivku přiblížení">
+        🔍 Zoom Ramp
+      </button>
+
       <button class="btn btn-secondary" id="btnUploadTrigger" title="Nahrát GPX nebo obrázek mapy">
         + Importovat GPX
       </button>
@@ -82,6 +87,14 @@
         </div>
 
         <div class="viewport-tools">
+          <div style="display:flex; align-items:center; gap:4px; margin-right:4px;">
+            <span style="font-size:10px; color:var(--text-muted); font-weight:600;">Lupa:</span>
+            <button class="tool-btn" id="btnZoomOutView" title="Oddálit celý pohled" style="padding:2px 6px;">−</button>
+            <input type="range" class="form-range" id="viewportZoomSlider" min="0.2" max="4.0" step="0.05" value="1.0" style="width:65px;" title="Měřítko viewportu (Dvojklik pro reset na 100%)">
+            <button class="tool-btn" id="btnZoomInView" title="Přiblížit celý pohled" style="padding:2px 6px;">+</button>
+            <button class="tool-btn" id="btnResetViewportZoom" title="Resetovat měřítko na 100%" style="padding:2px 6px; font-size:10px;">100%</button>
+            <button class="tool-btn" id="btnFitViewportRoute" title="Přizpůsobit celou trasu do okna (100% viditelnost)" style="padding:2px 6px; font-size:10px; color:var(--accent-cyan);">Fit</button>
+          </div>
           <select id="resSelect" class="tool-btn" style="background:var(--bg-input);">
             <option value="1920x1080">1080p (1920x1080)</option>
             <option value="3840x2160">4K UHD (3840x2160)</option>
@@ -120,6 +133,26 @@
         </div>
         <div class="speed-curve-canvas-wrap">
           <canvas id="speedCurveCanvas" width="1200" height="90"></canvas>
+        </div>
+      </div>
+
+      <!-- ZOOM RAMP BEZIER GRAPH (COLLAPSIBLE) -->
+      <div class="speed-ramp-panel" id="zoomRampPanel" style="display:none;">
+        <div class="speed-ramp-header">
+          <div class="speed-ramp-title">
+            <span style="color:var(--accent-cyan);">🔍 DaVinci Bezier Zoom Ramp</span>
+            <span style="color:var(--text-dim); font-weight:400;">(Kliknutím přidejte bod přiblížení, tažením změňte zoom 0.5x – 4.5x)</span>
+          </div>
+          <div class="speed-ramp-presets">
+            <span style="color:var(--text-muted); font-size:10.5px; align-self:center;">Předvolby záběru:</span>
+            <button class="speed-preset-btn" id="btnZoomStartOverview">Start detail ➔ Široký celek</button>
+            <button class="speed-preset-btn" id="btnZoomOverviewFinish">Celek ➔ Cílový detail</button>
+            <button class="speed-preset-btn" id="btnZoomPeak">Přiblížení na vrchol</button>
+            <button class="speed-preset-btn" id="btnZoomRebound">Odraz / Rebound</button>
+          </div>
+        </div>
+        <div class="speed-curve-canvas-wrap">
+          <canvas id="zoomCurveCanvas" width="1200" height="90"></canvas>
         </div>
       </div>
 
@@ -209,6 +242,18 @@
           <div class="form-group">
             <div class="form-label"><span>Dostupné snímky map</span></div>
             <select id="mapSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);"></select>
+          </div>
+
+          <div class="section-title">Snímky Projektu (Snapshots)</div>
+          <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:12px;">
+            <div style="font-size:10.5px; color:var(--text-muted); margin-bottom:8px;">
+              Uložte si různé varianty nastavení scény (měřítka, barvy, pozice HUD) pro rychlé přepínání ve střihu.
+            </div>
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+              <input type="text" id="snapshotNameInput" placeholder="Název snímku (např. Široký 4K záběr)..." class="tool-btn" style="flex:1; height:28px; text-align:left; background:var(--bg-panel); font-size:11px; padding:0 8px;">
+              <button class="btn btn-emerald" id="btnSaveSnapshot" style="padding:3px 10px; font-size:11px;">📸 Uložit</button>
+            </div>
+            <div id="snapshotsListContainer" style="max-height:130px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
           </div>
         </div>
 
@@ -301,6 +346,22 @@
                 <div class="color-swatch" style="background:#64748B;" title="Steel Slate" data-color="#64748B"></div>
               </div>
             </div>
+
+            <!-- HUD Units Color -->
+            <div class="form-group" style="margin-bottom:0;">
+              <div class="form-label"><span>Jednotky (km, m, %, h)</span></div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="color" id="colorUnits" value="#38BDF8" class="color-picker-input">
+                <span class="form-val" id="colorUnitsVal">#38BDF8</span>
+              </div>
+              <div class="color-presets" data-target="colorUnits">
+                <div class="color-swatch" style="background:#38BDF8;" title="Sky Blue" data-color="#38BDF8"></div>
+                <div class="color-swatch" style="background:#00F0FF;" title="Electric Cyan" data-color="#00F0FF"></div>
+                <div class="color-swatch" style="background:#94A3B8;" title="Muted Slate" data-color="#94A3B8"></div>
+                <div class="color-swatch" style="background:#FFFFFF;" title="Pure White" data-color="#FFFFFF"></div>
+                <div class="color-swatch" style="background:#FFB703;" title="Amber Gold" data-color="#FFB703"></div>
+              </div>
+            </div>
           </div>
 
           <div class="section-title">Styl Značek Start & Cíl</div>
@@ -377,8 +438,40 @@
           <div class="form-group">
             <div class="form-label"><span>Rozsah animace</span><span class="form-val" id="trimVal">0% — 100%</span></div>
             <div style="display:flex; gap:8px;">
-              <input type="range" class="form-range" id="trimInSlider" min="0" max="95" value="0">
-              <input type="range" class="form-range" id="trimOutSlider" min="5" max="100" value="100">
+              <input type="range" class="form-range" id="trimInSlider" min="0" max="95" value="0" title="Trim Od (Dvojklik pro reset)">
+              <input type="range" class="form-range" id="trimOutSlider" min="5" max="100" value="100" title="Trim Do (Dvojklik pro reset)">
+            </div>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <div style="flex:1;">
+                <div style="font-size:10px; color:var(--text-muted); margin-bottom:2px;">Od kilometru:</div>
+                <div style="display:flex; align-items:center; gap:4px;">
+                  <input type="number" id="trimInKmInput" class="tool-btn" style="width:100%; height:26px; text-align:left; padding:2px 6px;" min="0" step="0.1" value="0.0">
+                  <span style="font-size:10px; color:var(--text-dim);">km</span>
+                </div>
+              </div>
+              <div style="flex:1;">
+                <div style="font-size:10px; color:var(--text-muted); margin-bottom:2px;">Do kilometru:</div>
+                <div style="display:flex; align-items:center; gap:4px;">
+                  <input type="number" id="trimOutKmInput" class="tool-btn" style="width:100%; height:26px; text-align:left; padding:2px 6px;" min="0" step="0.1" value="100.0">
+                  <span style="font-size:10px; color:var(--text-dim);">km</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-title">Vlastní Foto Podklad (Pro průhledný HUD)</div>
+          <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:12px;">
+            <div style="font-size:10.5px; color:var(--text-muted); margin-bottom:8px;">
+              Nahrajte fotku z dronu nebo akční kamery pro náhled HUD telemetrie přímo nad vaším záběrem.
+            </div>
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+              <button class="btn btn-secondary" id="btnUploadBackdrop" style="flex:1; justify-content:center; padding:4px 8px; font-size:11px;">📷 Nahrát fotku</button>
+              <input type="file" id="backdropFileInput" accept=".png,.jpg,.jpeg,.webp" style="display:none;">
+              <button class="btn btn-secondary" id="btnClearBackdrop" title="Odstranit fotku" style="display:none; color:var(--accent-danger); padding:4px 8px;">🗑️</button>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <div class="form-label" style="font-size:10px;"><span>Krytí fotky</span><span class="form-val" id="backdropOpacityVal">65%</span></div>
+              <input type="range" class="form-range" id="backdropOpacitySlider" min="0" max="100" value="65">
             </div>
           </div>
         </div>
@@ -415,6 +508,61 @@
             </div>
             <div style="font-size:10.5px; color:var(--text-dim); line-height:1.3;" id="apiKeyStatusText">
               Klíč je bezpečně uložen v lokální SQLite databázi <code>./data/projects.db</code> a nikdy se neposílá na GitHub.
+            </div>
+          </div>
+
+          <div class="section-title">Úroveň Detailů (LOD) & Vrstvy Mapy</div>
+          <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:14px;">
+            <div style="font-size:10.5px; color:var(--text-muted); margin-bottom:8px;">
+              Zapněte nebo vypněte konkrétní prvky pro čistý televizní styl bez rušivých prvků.
+            </div>
+
+            <div class="toggle-item" style="padding:4px 0;">
+              <span>Přehrady a velká jezera (Lipno, Orlík, Slapy...)</span>
+              <label class="toggle-switch"><input type="checkbox" id="lodToggleLakes" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="form-group" style="margin:4px 0 8px 0;">
+              <div class="form-label" style="font-size:10px;"><span>Krytí vodních ploch</span><span class="form-val" id="lodLakesOpacityVal">50%</span></div>
+              <input type="range" class="form-range" id="lodLakesOpacitySlider" min="10" max="100" value="50">
+            </div>
+
+            <div class="toggle-item" style="padding:4px 0;">
+              <span>Hlavní řeky (Vltava, Sázava, Lužnice...)</span>
+              <label class="toggle-switch"><input type="checkbox" id="lodToggleRivers"><span class="toggle-slider"></span></label>
+            </div>
+            <div class="form-group" style="margin:4px 0 8px 0;">
+              <div class="form-label" style="font-size:10px;"><span>Šířka řek</span><span class="form-val" id="lodRiversWidthVal">3.0px</span></div>
+              <input type="range" class="form-range" id="lodRiversWidthSlider" min="1.0" max="8.0" step="0.5" value="3.0">
+            </div>
+
+            <div class="toggle-item" style="padding:4px 0;">
+              <span>Dálnice a rychlostní tahy</span>
+              <label class="toggle-switch"><input type="checkbox" id="lodToggleMotorways" checked><span class="toggle-slider"></span></label>
+            </div>
+
+            <div class="toggle-item" style="padding:4px 0;">
+              <span>Silnice I. a II. třídy</span>
+              <label class="toggle-switch"><input type="checkbox" id="lodTogglePrimaryRoads" checked><span class="toggle-slider"></span></label>
+            </div>
+
+            <div class="toggle-item" style="padding:4px 0;">
+              <span>Místní a vedlejší cesty</span>
+              <label class="toggle-switch"><input type="checkbox" id="lodToggleLocalRoads"><span class="toggle-slider"></span></label>
+            </div>
+
+            <div class="toggle-item" style="padding:4px 0;">
+              <span>Cyklostezky a turistické trasy</span>
+              <label class="toggle-switch"><input type="checkbox" id="lodTogglePaths"><span class="toggle-slider"></span></label>
+            </div>
+
+            <div class="toggle-item" style="padding:4px 0;">
+              <span>Města a obce (Popisky)</span>
+              <label class="toggle-switch"><input type="checkbox" id="lodToggleSettlements" checked><span class="toggle-slider"></span></label>
+            </div>
+
+            <div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:10px; color:var(--text-muted);" id="tileCacheStatus">Dlaždice: 0 MB</span>
+              <button class="btn btn-secondary" id="btnClearTileCache" style="padding:2px 8px; font-size:10px;">Vyčistit cache</button>
             </div>
           </div>
 
@@ -507,10 +655,57 @@
               <input type="time" id="clockFinishTime" class="tool-btn" style="width:100%; height:28px; background:var(--bg-input);" value="15:45">
             </div>
           </div>
+
+          <div class="section-title">Časové Milníky na Trase (Km ➔ Skutečný Čas)</div>
+          <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:12px;">
+            <div style="font-size:10.5px; color:var(--text-muted); margin-bottom:8px;">
+              Přiřaďte přesný reálný čas k určitému kilometru. Telemetrické hodiny plynule interpolují mezi zadanými body.
+            </div>
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+              <input type="number" id="milestoneKmInput" placeholder="Km (např. 45.2)" class="tool-btn" style="width:85px; height:28px; text-align:left; padding:2px 6px;" min="0" step="0.1">
+              <input type="time" id="milestoneTimeInput" class="tool-btn" style="width:85px; height:28px;" value="11:20">
+              <input type="text" id="milestoneLabelInput" placeholder="Popis (např. Oběd Tábor)" class="tool-btn" style="flex:1; height:28px; text-align:left; padding:2px 6px;">
+              <button class="btn btn-emerald" id="btnAddMilestone" style="padding:2px 8px; font-size:11px;">+ Přidat</button>
+            </div>
+            <div id="milestonesListContainer" style="max-height:120px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+          </div>
         </div>
 
         <!-- TAB 5: LANDMARKS & RIVERS -->
         <div class="inspector-tab-pane" id="paneLandmarks">
+          <div class="section-title">Nastavení Zaměření Místa (Spotlight)</div>
+          <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:12px;">
+            <div class="form-group" style="margin-bottom:6px;">
+              <div class="form-label"><span>Název cílového místa</span></div>
+              <input type="text" id="spotlightNameInput" class="tool-btn" style="width:100%; height:28px; text-align:left; padding:2px 8px;" value="Praha (Vyšehrad)">
+            </div>
+            <div style="display:flex; gap:6px; margin-bottom:6px;">
+              <div style="flex:1;">
+                <div style="font-size:10px; color:var(--text-muted); margin-bottom:2px;">Zeměpisná šířka (Lat):</div>
+                <input type="number" id="spotlightLatInput" class="tool-btn" style="width:100%; height:26px; text-align:left; padding:2px 6px;" step="0.0001" value="50.068281">
+              </div>
+              <div style="flex:1;">
+                <div style="font-size:10px; color:var(--text-muted); margin-bottom:2px;">Zeměpisná délka (Lon):</div>
+                <input type="number" id="spotlightLonInput" class="tool-btn" style="width:100%; height:26px; text-align:left; padding:2px 6px;" step="0.0001" value="14.424340">
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:6px;">
+              <div class="form-label"><span>Detail přiblížení (Zoom)</span><span class="form-val" id="spotlightZoomVal">14.0x</span></div>
+              <input type="range" class="form-range" id="spotlightZoomSlider" min="9.0" max="17.0" step="0.5" value="14.0">
+            </div>
+            <div class="toggle-item" style="padding:4px 0;">
+              <span>Odraz kamery na konci (Ending Rebound)</span>
+              <label class="toggle-switch"><input type="checkbox" id="toggleSpotlightRebound" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="toggle-item" style="padding:4px 0;">
+              <span>Vykreslit trasu v záběru</span>
+              <label class="toggle-switch"><input type="checkbox" id="toggleSpotlightRoute" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div style="font-size:10px; color:var(--text-dim); margin-top:6px;">
+              💡 Testovací bod: 14°25'27.625"E, 50°4'5.810"N (Vyšehrad)
+            </div>
+          </div>
+
           <div class="section-title">Vyhledat a Přidat Místo v ČR</div>
           <div style="display:flex; gap:6px; margin-bottom:10px;">
             <input type="text" id="landmarkSearchInput" placeholder="Např. Tábor, Vltava, Zvíkov..." class="tool-btn" style="flex:1; height:32px; text-align:left; background:var(--bg-input); padding:4px 10px;">

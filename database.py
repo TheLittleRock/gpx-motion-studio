@@ -116,6 +116,29 @@ class ProjectDatabase:
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
             """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                data_json TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS time_milestones (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                km REAL NOT NULL,
+                time_str TEXT NOT NULL,
+                note TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            """)
             conn.commit()
 
         # Seed default project if database is empty
@@ -313,6 +336,87 @@ class ProjectDatabase:
                 (key, str(value))
             )
             conn.commit()
+
+    def delete_app_setting(self, key):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM app_settings WHERE key = ?", (key,))
+            conn.commit()
+
+    # Snapshots
+    def create_snapshot(self, project_id, name, data):
+        snap_id = uuid.uuid4().hex[:10]
+        now = datetime.utcnow().isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO snapshots (id, project_id, name, created_at, data_json) VALUES (?, ?, ?, ?, ?)",
+                (snap_id, project_id, name, now, json.dumps(data))
+            )
+            conn.commit()
+            return {"id": snap_id, "project_id": project_id, "name": name, "created_at": now, "data": data}
+
+    def list_snapshots(self, project_id):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, project_id, name, created_at, data_json FROM snapshots WHERE project_id = ? ORDER BY created_at DESC", (project_id,))
+            rows = cursor.fetchall()
+            res = []
+            for r in rows:
+                item = dict(r)
+                try:
+                    item["data"] = json.loads(item["data_json"])
+                except Exception:
+                    item["data"] = {}
+                del item["data_json"]
+                res.append(item)
+            return res
+
+    def get_snapshot(self, snapshot_id):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, project_id, name, created_at, data_json FROM snapshots WHERE id = ?", (snapshot_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            item["data"] = json.loads(item["data_json"])
+            del item["data_json"]
+            return item
+
+    def delete_snapshot(self, snapshot_id):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM snapshots WHERE id = ?", (snapshot_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # Time Milestones
+    def create_time_milestone(self, project_id, km, time_str, note=""):
+        m_id = uuid.uuid4().hex[:8]
+        now = datetime.utcnow().isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO time_milestones (id, project_id, km, time_str, note, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (m_id, project_id, float(km), time_str, note or "", now)
+            )
+            conn.commit()
+            return {"id": m_id, "project_id": project_id, "km": float(km), "time_str": time_str, "note": note}
+
+    def list_time_milestones(self, project_id):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, project_id, km, time_str, note, created_at FROM time_milestones WHERE project_id = ? ORDER BY km ASC", (project_id,))
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_time_milestone(self, milestone_id):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM time_milestones WHERE id = ?", (milestone_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def get_cached_vector_layers(self, project_id):
         with self.get_connection() as conn:

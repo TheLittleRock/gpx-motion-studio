@@ -7,7 +7,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -19,6 +19,7 @@ import landmarks_data
 import json
 from database import ProjectDatabase
 from vector_map_engine import VectorMapEngine
+from tile_service import tile_service
 
 app = FastAPI(title="Rekola GPX & Map Motion Graphics Studio", version="2.0.0")
 
@@ -87,6 +88,27 @@ class ProjectDuplicateRequest(BaseModel):
 
 class ApiKeyRequest(BaseModel):
     apikey: Optional[str] = None
+
+class SnapshotCreateRequest(BaseModel):
+    name: str
+    data: Optional[dict] = None
+    config: Optional[dict] = None
+
+class MilestoneCreateRequest(BaseModel):
+    km: float
+    time_str: Optional[str] = None
+    clock_time: Optional[str] = None
+    note: Optional[str] = ""
+    label: Optional[str] = ""
+
+class PrefetchRequest(BaseModel):
+    provider: str = "mapy_outdoor"
+    bounds: dict
+    min_z: int = 9
+    max_z: int = 14
+
+class TileClearRequest(BaseModel):
+    provider: Optional[str] = None
 
 @app.get("/")
 async def root():
@@ -340,6 +362,69 @@ async def delete_api_key():
     """Removes stored Mapy.com API key."""
     db.set_app_setting("mapy_api_key", "")
     return {"status": "deleted", "message": "API klíč byl odstraněn. Aktivována výchozí mapa CyclOSM bez vodoznaku."}
+
+# ==================== DYNAMIC SLIPPY TILE ENGINE ====================
+@app.get("/api/tiles/{provider}/{z}/{x}/{y}")
+async def get_map_tile(provider: str, z: int, x: int, y: int):
+    """Serves 256x256 map tiles cached on disk for live canvas rendering and 60fps ProRes export."""
+    apikey = db.get_app_setting("mapy_api_key", "")
+    tile_bytes = tile_service.get_tile(provider, z, x, y, apikey=apikey)
+    if not tile_bytes:
+        raise HTTPException(status_code=404, detail="Tile not found or failed to load")
+    return Response(
+        content=tile_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=604800, immutable"}
+    )
+
+@app.get("/api/tiles/stats")
+async def get_tile_stats():
+    return tile_service.get_cache_stats()
+
+@app.post("/api/tiles/clear")
+async def clear_tile_cache(req: Optional[TileClearRequest] = None):
+    p = req.provider if req else None
+    tile_service.clear_cache(p)
+    return {"status": "cleared", "provider": p or "all"}
+
+@app.post("/api/tiles/prefetch")
+async def prefetch_tiles(req: PrefetchRequest):
+    apikey = db.get_app_setting("mapy_api_key", "")
+    count = tile_service.prefetch_route_tiles(req.provider, req.bounds, req.min_z, req.max_z, apikey)
+    return {"status": "success", "prefetched_count": count}
+
+# ==================== SNAPSHOTS ====================
+@app.get("/api/projects/{project_id}/snapshots")
+async def list_snapshots(project_id: str):
+    return {"snapshots": db.list_snapshots(project_id)}
+
+@app.post("/api/projects/{project_id}/snapshots")
+async def create_snapshot(project_id: str, req: SnapshotCreateRequest):
+    snap_data = req.data if req.data is not None else (req.config or {})
+    snap = db.create_snapshot(project_id, req.name, snap_data)
+    return {"status": "success", "snapshot": snap}
+
+@app.delete("/api/projects/{project_id}/snapshots/{snapshot_id}")
+async def delete_snapshot(project_id: str, snapshot_id: str):
+    ok = db.delete_snapshot(snapshot_id)
+    return {"status": "deleted" if ok else "not_found"}
+
+# ==================== TIME MILESTONES ====================
+@app.get("/api/projects/{project_id}/milestones")
+async def list_milestones(project_id: str):
+    return {"milestones": db.list_time_milestones(project_id)}
+
+@app.post("/api/projects/{project_id}/milestones")
+async def create_milestone(project_id: str, req: MilestoneCreateRequest):
+    time_val = req.time_str or req.clock_time or "00:00"
+    note_val = req.label or req.note or ""
+    m = db.create_time_milestone(project_id, req.km, time_val, note_val)
+    return {"status": "success", "milestone": m}
+
+@app.delete("/api/projects/{project_id}/milestones/{milestone_id}")
+async def delete_milestone(project_id: str, milestone_id: str):
+    ok = db.delete_time_milestone(milestone_id)
+    return {"status": "deleted" if ok else "not_found"}
 
 @app.get("/api/rivers")
 async def get_rivers():

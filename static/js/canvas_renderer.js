@@ -78,6 +78,7 @@ class CanvasRenderer {
       elevationFillAlpha: 0.45,
       text: '#f0f6fc',           // Main typography & telemetry values
       textDim: 'rgba(240,246,252,0.6)',
+      units: '#38bdf8',          // Dedicated HUD unit color (km, m, %, h)
       cardBg: 'rgba(15, 18, 24, 0.88)',
       cardBorder: 'rgba(255, 255, 255, 0.12)',
       river: '#00a8ff',          // Vltava and major rivers (Vibrant Blue)
@@ -85,6 +86,45 @@ class CanvasRenderer {
       finishMarker: '#00f0ff',   // Finish badge color (Cyan)
       glowIntensity: 2           // 0: Off, 1: Low, 2: Med, 3: Neon Ultra
     };
+
+    // Dynamic Slippy Tile Engine & Local Disk Cache
+    this.tileCache = new Map();
+    this.tileProvider = 'mapy_outdoor';
+
+    // Custom Photo Backdrop for Transparent / HUD Modes
+    this.backdropImage = null;
+    this.backdropLoaded = false;
+    this.backdropOpacity = 0.65;
+
+    // Vector LOD Layer Management
+    this.lod = {
+      lakes_dams: true,
+      rivers: false, // auto-off on Mapy.com raster to prevent duplicate rivers
+      motorways: true,
+      primary_roads: true,
+      local_roads: false,
+      paths: false,
+      settlements: true,
+      lakesOpacity: 0.50,
+      riversWidth: 3.0
+    };
+
+    // Zoom Ramp Curve & 4 Broadcast Presets
+    this.zoomKeyframes = [
+      { progress: 0.0, zoom: 2.2 },
+      { progress: 1.0, zoom: 2.2 }
+    ];
+
+    // Real-World Time Milestones (km -> HH:MM:SS)
+    this.timeMilestones = [];
+
+    // Kilometer-based Trimming
+    this.trimInKm = 0.0;
+    this.trimOutKm = 100.0;
+
+    // Whole Viewport Zoom & Pan
+    this.viewportZoom = 1.0;
+    this.viewportPan = { x: 0, y: 0 };
     
     // Line & Beacon Sizes
     this.lineWidth = 5;
@@ -226,6 +266,113 @@ class CanvasRenderer {
 
   setRivers(rivers) {
     this.rivers = rivers || [];
+  }
+
+  setBackdropImage(img, opacity = 0.65) {
+    this.backdropImage = img;
+    this.backdropLoaded = true;
+    this.backdropOpacity = opacity;
+  }
+
+  setLOD(lodConfig) {
+    this.lod = { ...this.lod, ...lodConfig };
+  }
+
+  setZoomKeyframes(keyframes) {
+    if (Array.isArray(keyframes) && keyframes.length > 0) {
+      this.zoomKeyframes = [...keyframes].sort((a, b) => a.progress - b.progress);
+    }
+  }
+
+  setTimeMilestones(milestones) {
+    this.timeMilestones = milestones || [];
+  }
+
+  getZoomAtProgress(progress) {
+    if (!this.zoomKeyframes || this.zoomKeyframes.length === 0) return this.camZoom;
+    const p = Math.max(0, Math.min(1, progress));
+    const kfs = this.zoomKeyframes;
+    if (p <= kfs[0].progress) return kfs[0].zoom;
+    if (p >= kfs[kfs.length - 1].progress) return kfs[kfs.length - 1].zoom;
+
+    for (let i = 0; i < kfs.length - 1; i++) {
+      const k0 = kfs[i];
+      const k1 = kfs[i + 1];
+      if (p >= k0.progress && p <= k1.progress) {
+        const span = (k1.progress - k0.progress) || 0.001;
+        const t = (p - k0.progress) / span;
+        const easeT = t * t * (3 - 2 * t); // Smooth S-curve easing
+        return k0.zoom + (k1.zoom - k0.zoom) * easeT;
+      }
+    }
+    return this.camZoom;
+  }
+
+  getTimeAtDist(distKm) {
+    if (!this.timeMilestones || this.timeMilestones.length === 0) {
+      const hours = distKm / 24.0;
+      const h = Math.floor(hours);
+      const m = Math.floor((hours - h) * 60);
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+
+    const ms = [...this.timeMilestones].sort((a, b) => a.km - b.km);
+    if (distKm <= ms[0].km) return ms[0].time_str.substring(0, 5);
+    if (distKm >= ms[ms.length - 1].km) return ms[ms.length - 1].time_str.substring(0, 5);
+
+    const toSec = (str) => {
+      const p = str.split(':').map(Number);
+      return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0);
+    };
+    const toTimeStr = (sec) => {
+      sec = Math.round(sec);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+
+    for (let i = 0; i < ms.length - 1; i++) {
+      const m0 = ms[i];
+      const m1 = ms[i + 1];
+      if (distKm >= m0.km && distKm <= m1.km) {
+        const ratio = (distKm - m0.km) / ((m1.km - m0.km) || 1);
+        const s0 = toSec(m0.time_str);
+        const s1 = toSec(m1.time_str);
+        return toTimeStr(s0 + (s1 - s0) * ratio);
+      }
+    }
+    return ms[0].time_str.substring(0, 5);
+  }
+
+  getSmoothedPoints() {
+    if (!this.gpxData || !this.gpxData.points || this.gpxData.points.length === 0) return [];
+    if (this._cachedSmoothedTrack) return this._cachedSmoothedTrack;
+
+    const raw = this.gpxData.points;
+    const n = raw.length;
+    if (n < 6) return raw;
+
+    const w = 4;
+    const smoothed = [];
+    for (let i = 0; i < n; i++) {
+      let sumMx = 0, sumMy = 0, sumEle = 0, sumGrade = 0, count = 0;
+      for (let j = Math.max(0, i - w); j <= Math.min(n - 1, i + w); j++) {
+        sumMx += raw[j].merc_x;
+        sumMy += raw[j].merc_y;
+        sumEle += raw[j].ele;
+        sumGrade += raw[j].grade;
+        count++;
+      }
+      smoothed.push({
+        ...raw[i],
+        merc_x: sumMx / count,
+        merc_y: sumMy / count,
+        ele: sumEle / count,
+        grade: sumGrade / count
+      });
+    }
+    this._cachedSmoothedTrack = smoothed;
+    return smoothed;
   }
 
   setLandmarks(landmarks) {
@@ -390,8 +537,221 @@ class CanvasRenderer {
     }
   }
 
+  // --- DYNAMIC SLIPPY TILE ENGINE ---
+  drawSlippyMap(ctx, centerMercX, centerMercY, zoomFractional, viewportW, viewportH) {
+    if (!this.tileCache) this.tileCache = new Map();
+    const provider = this.tileProvider || 'mapy_outdoor';
+    const z = Math.max(6, Math.min(18, Math.round(zoomFractional)));
+    const n = Math.pow(2, z);
+    const scaleFactor = Math.pow(2, zoomFractional - z);
+
+    const centerX = centerMercX * n * 256;
+    const centerY = centerMercY * n * 256;
+
+    const halfW = (viewportW / 2) / scaleFactor;
+    const halfH = (viewportH / 2) / scaleFactor;
+
+    const minX = Math.floor((centerX - halfW) / 256) - 1;
+    const maxX = Math.floor((centerX + halfW) / 256) + 1;
+    const minY = Math.floor((centerY - halfH) / 256) - 1;
+    const maxY = Math.floor((centerY + halfH) / 256) + 1;
+
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        if (x < 0 || x >= n || y < 0 || y >= n) continue;
+        const key = `${provider}_${z}_${x}_${y}`;
+        let entry = this.tileCache.get(key);
+        if (!entry) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          entry = { img, loaded: false };
+          this.tileCache.set(key, entry);
+          img.onload = () => { entry.loaded = true; };
+          img.onerror = () => { entry.error = true; };
+          img.src = `/api/tiles/${provider}/${z}/${x}/${y}`;
+        }
+
+        const screenX = (x * 256 - centerX) * scaleFactor + viewportW / 2;
+        const screenY = (y * 256 - centerY) * scaleFactor + viewportH / 2;
+        const screenW = Math.ceil(256 * scaleFactor) + 1;
+        const screenH = Math.ceil(256 * scaleFactor) + 1;
+
+        if (entry.loaded) {
+          ctx.drawImage(entry.img, screenX, screenY, screenW, screenH);
+        } else {
+          ctx.fillStyle = '#0f131a';
+          ctx.fillRect(screenX, screenY, screenW, screenH);
+        }
+      }
+    }
+  }
+
+  mercToScreenTiles(mx, my, centerMercX, centerMercY, zoomFractional, viewportW, viewportH) {
+    const z = Math.max(6, Math.min(18, Math.round(zoomFractional)));
+    const n = Math.pow(2, z);
+    const scaleFactor = Math.pow(2, zoomFractional - z);
+    const centerX = centerMercX * n * 256;
+    const centerY = centerMercY * n * 256;
+    return {
+      x: (mx * n * 256 - centerX) * scaleFactor + viewportW / 2,
+      y: (my * n * 256 - centerY) * scaleFactor + viewportH / 2
+    };
+  }
+
+  // --- VECTOR LOD LAYERS ---
+  drawLODLayers(ctx, toScreen) {
+    if (!this.vectorLayers) return;
+    const layers = this.vectorLayers;
+    const s = this.hudScale;
+
+    // 1. Water Bodies: Lakes & Dams
+    if (this.lod.lakes_dams && layers.lakes_dams) {
+      ctx.fillStyle = this.hexToRgba(this.colors.river, this.lod.lakesOpacity || 0.45);
+      ctx.strokeStyle = this.colors.river;
+      ctx.lineWidth = 1.2 * s;
+      for (const l of layers.lakes_dams) {
+        if (!l.points || l.points.length < 3) continue;
+        ctx.beginPath();
+        for (let i = 0; i < l.points.length; i++) {
+          const pt = toScreen(l.points[i].mx, l.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // 2. Rivers
+    if (this.lod.rivers && layers.rivers) {
+      ctx.strokeStyle = this.colors.river;
+      ctx.lineWidth = (this.lod.riversWidth || 3.0) * s;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const r of layers.rivers) {
+        if (!r.points || r.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < r.points.length; i++) {
+          const pt = toScreen(r.points[i].mx, r.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 3. Urban Areas
+    if (layers.urban_areas) {
+      ctx.fillStyle = 'rgba(28, 35, 48, 0.45)';
+      ctx.strokeStyle = 'rgba(55, 68, 90, 0.55)';
+      ctx.lineWidth = 1;
+      for (const u of layers.urban_areas) {
+        if (!u.points || u.points.length < 3) continue;
+        ctx.beginPath();
+        for (let i = 0; i < u.points.length; i++) {
+          const pt = toScreen(u.points[i].mx, u.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // 4. Motorways (Dual Casing)
+    if (this.lod.motorways && layers.motorways) {
+      for (const m of layers.motorways) {
+        if (!m.points || m.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < m.points.length; i++) {
+          const pt = toScreen(m.points[i].mx, m.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.strokeStyle = 'rgba(10, 14, 20, 0.9)';
+        ctx.lineWidth = 6 * s;
+        ctx.stroke();
+
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 2.8 * s;
+        ctx.stroke();
+      }
+    }
+
+    // 5. Primary Roads
+    if (this.lod.primary_roads && layers.primary_roads) {
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.65)';
+      ctx.lineWidth = 2.5 * s;
+      for (const pr of layers.primary_roads) {
+        if (!pr.points || pr.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < pr.points.length; i++) {
+          const pt = toScreen(pr.points[i].mx, pr.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 6. Local Roads
+    if (this.lod.local_roads && layers.local_roads) {
+      ctx.strokeStyle = 'rgba(100, 116, 139, 0.45)';
+      ctx.lineWidth = 1.5 * s;
+      for (const lr of layers.local_roads) {
+        if (!lr.points || lr.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < lr.points.length; i++) {
+          const pt = toScreen(lr.points[i].mx, lr.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 7. Paths (Cycle / Pedestrian)
+    if (this.lod.paths && layers.paths) {
+      ctx.strokeStyle = '#39ff14';
+      ctx.lineWidth = 1.8 * s;
+      ctx.setLineDash([4 * s, 4 * s]);
+      for (const pa of layers.paths) {
+        if (!pa.points || pa.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < pa.points.length; i++) {
+          const pt = toScreen(pa.points[i].mx, pa.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+
+    // 8. Settlements & Towns
+    if (this.lod.settlements && layers.places) {
+      for (const pl of layers.places) {
+        const pt = toScreen(pl.mx, pl.my);
+        this.drawCityLabel(ctx, pt.x, pt.y, pl.name, pl.rank, s);
+      }
+    }
+  }
   // --- MODE 1: TELEMETRY HUD (ALPHA OVERLAY) ---
   renderModeHUD(idx0, interp, curMercX, curMercY, progress, dist, ele, grade) {
+    const ctx = this.ctx;
+    // Optional Photo Backdrop
+    if (this.backdropImage && this.backdropLoaded) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));
+      const scale = Math.max(this.width / this.backdropImage.width, this.height / this.backdropImage.height);
+      const drawW = this.backdropImage.width * scale;
+      const drawH = this.backdropImage.height * scale;
+      ctx.drawImage(this.backdropImage, (this.width - drawW) / 2, (this.height - drawH) / 2, drawW, drawH);
+      ctx.restore();
+    }
+
     if (this.toggles.miniMap) {
       this.drawCornerMiniMap(idx0, interp, curMercX, curMercY);
     }
@@ -435,25 +795,6 @@ class CanvasRenderer {
 
     ctx.save();
 
-    // 1. Background Map (Style A Panorama or Style B GTA Vector)
-    if (this.toggles.bgMap) {
-      if (this.mapStyle === 'vector' && this.vectorLayers) {
-        // Render GTA Radar Vector Map
-        this.renderVectorMapCorridor(ctx, w, h);
-      } else if (this.mapLoaded && this.mapImage) {
-        // Full bleed 16:9 Mapy.com Panorama
-        const scaleX = w / this.mapImage.width;
-        const scaleY = h / this.mapImage.height;
-        const fitScale = Math.max(scaleX, scaleY);
-        const drawW = this.mapImage.width * fitScale;
-        const drawH = this.mapImage.height * fitScale;
-        ctx.drawImage(this.mapImage, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
-        ctx.fillStyle = 'rgba(10, 14, 20, 0.40)';
-        ctx.fillRect(0, 0, w, h);
-      }
-    }
-
-    // 2. Fullscreen Bounding Box & Route Framing
     const b = this.gpxData.bounds;
     const spanX = (b.max_mx - b.min_mx) || 0.001;
     const spanY = (b.max_my - b.min_my) || 0.001;
@@ -463,22 +804,38 @@ class CanvasRenderer {
     const usableW = w - marginX * 2;
     const usableH = h - marginY * 2;
 
-    const routeScale = Math.min(usableW / spanX, usableH / spanY);
-    const offsetX = marginX + (usableW - spanX * routeScale) / 2;
-    const offsetY = marginY + (usableH - spanY * routeScale) / 2;
+    const vZoom = Math.max(0.2, Math.min(5.0, this.viewportZoom || 1.0));
+    const routeScale = Math.min(usableW / spanX, usableH / spanY) * vZoom;
+    const offsetX = marginX + (usableW - spanX * routeScale) / 2 + (this.viewportPan.x || 0);
+    const offsetY = marginY + (usableH - spanY * routeScale) / 2 + (this.viewportPan.y || 0);
 
     const toScreen = (mx, my) => ({
       x: offsetX + (mx - b.min_mx) * routeScale,
       y: offsetY + (my - b.min_my) * routeScale
     });
 
-    // 3. Draw Water / Rivers (Vltava, Sázava etc.) strictly in background
-    if (this.toggles.rivers && this.rivers && this.rivers.length > 0) {
-      this.drawRiversVector(ctx, toScreen);
+    // 1. Background Map (Style A Tile Engine or Style B Vector)
+    if (this.toggles.bgMap) {
+      if (this.mapStyle === 'vector' && this.vectorLayers) {
+        this.drawLODLayers(ctx, toScreen);
+      } else {
+        const centerMx = (b.min_mx + b.max_mx) / 2;
+        const centerMy = (b.min_my + b.max_my) / 2;
+        const baseZ = Math.log2((w * 0.65) / (spanX * 256));
+        const fitZoom = Math.max(7, Math.min(16, baseZ + Math.log2(vZoom)));
+        this.drawSlippyMap(ctx, centerMx, centerMy, fitZoom, w, h);
+        ctx.fillStyle = 'rgba(10, 14, 20, 0.35)';
+        ctx.fillRect(0, 0, w, h);
+      }
     }
 
-    // 4. Full Route Underlay (Muted Trail)
-    const points = this.gpxData.points;
+    // 2. Vector LOD Layers overlay
+    if (this.vectorLayers) {
+      this.drawLODLayers(ctx, toScreen);
+    }
+
+    // 3. Full Route Underlay (Smoothed)
+    const points = this.getSmoothedPoints();
     const n = points.length;
 
     ctx.beginPath();
@@ -493,7 +850,7 @@ class CanvasRenderer {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
-    // 5. Active Animated Trace Line
+    // 4. Active Animated Glowing Trail
     ctx.save();
     if (this.colors.glowIntensity > 0) {
       ctx.shadowColor = this.colors.path;
@@ -508,29 +865,40 @@ class CanvasRenderer {
     }
     const currentTip = toScreen(curMercX, curMercY);
     ctx.lineTo(currentTip.x, currentTip.y);
-
     ctx.strokeStyle = this.colors.path;
     ctx.lineWidth = Math.max(4, this.lineWidth * 1.2 * s);
     ctx.stroke();
     ctx.restore();
 
-    // 6. Start Marker: Stop pulse as soon as rider departs!
+    // 5. Start Marker
     const startPt = toScreen(points[0].merc_x, points[0].merc_y);
-    const isAtStart = progress <= 0.02; // Stop pulse once rider leaves start
+    const isAtStart = progress <= 0.02;
     this.drawStartFinishMarker(ctx, startPt.x, startPt.y, `START • ${this.startCityName}`, this.colors.startMarker, isAtStart);
 
-    // 7. Finish Marker: Pulse begins upon arrival at destination!
+    // 6. Finish Marker
     const finishPt = toScreen(points[n - 1].merc_x, points[n - 1].merc_y);
     const isFinished = progress >= 0.98;
     this.drawStartFinishMarker(ctx, finishPt.x, finishPt.y, `CÍL • ${this.finishCityName}`, this.colors.finishMarker, isFinished);
 
-    // 8. En-Route Milestone Badges with Collision Avoidance
+    // 7. En-Route Milestone Badges
     if (this.toggles.landmarks && this.landmarks) {
       for (const lm of this.landmarks) {
         const mxmy = this.latLonToMercator(lm.lat, lm.lon);
         if (mxmy.x >= b.min_mx && mxmy.x <= b.max_mx && mxmy.y >= b.min_my && mxmy.y <= b.max_my) {
           const lPt = toScreen(mxmy.x, mxmy.y);
           this.drawLandmarkLabel(ctx, lPt.x, lPt.y, lm.name, lm.category, s);
+        }
+      }
+    }
+
+    // 8. Custom Waypoint Callouts
+    if (this.toggles.waypoints && this.waypoints) {
+      for (const wp of this.waypoints) {
+        if (dist >= wp.dist_km - 2.0 && dist <= wp.dist_km + 4.0) {
+          const wpIdx = Math.min(n - 1, Math.max(0, Math.floor((wp.dist_km / (points[n - 1].dist_km || 1)) * (n - 1))));
+          const wpPt = toScreen(points[wpIdx].merc_x, points[wpIdx].merc_y);
+          const pop = Math.min(1.0, (dist - (wp.dist_km - 2.0)) / 1.0);
+          this.drawWaypointCard(ctx, wpPt.x, wpPt.y, wp.title, wp.desc, s, pop);
         }
       }
     }
@@ -559,46 +927,73 @@ class CanvasRenderer {
 
     const t = Math.max(0, Math.min(1, progress));
     const smoothT = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-    const currentZoom = 1.0 + (this.spotlight.zoomLevel - 1.0) * smoothT;
+
+    // Ending Rebound / Push-out animation
+    let rebound = 0;
+    if (this.spotlight.endingRebound && t > 0.80) {
+      const rt = (t - 0.80) / 0.20;
+      rebound = Math.sin(rt * Math.PI) * 0.15; // smooth 15% pulse-back
+    }
+
+    const targetZoomLevel = this.spotlight.zoomLevel || 14.0;
+    const startZoomLevel = Math.max(7, targetZoomLevel - 4.5);
+    const currentZoom = startZoomLevel + (targetZoomLevel - startZoomLevel) * smoothT - (rebound * targetZoomLevel);
 
     const targetMerc = this.latLonToMercator(this.spotlight.targetLat, this.spotlight.targetLon);
-    const targetPix = this.gpxToMapPixels(targetMerc.x, targetMerc.y);
-
-    ctx.translate(w / 2, h / 2);
-    ctx.scale(currentZoom, currentZoom);
-    ctx.translate(-targetPix.x, -targetPix.y);
 
     if (this.toggles.bgMap) {
-      if (this.mapStyle === 'vector' && this.vectorLayers) {
-        this.renderVectorMapCorridor(ctx, w, h);
-      } else if (this.mapLoaded && this.mapImage) {
-        ctx.drawImage(this.mapImage, 0, 0);
+      if (this.mapStyle === 'mapy') {
+        this.drawSlippyMap(ctx, targetMerc.x, targetMerc.y, currentZoom, w, h);
+      } else {
+        ctx.fillStyle = '#0f1115';
+        ctx.fillRect(0, 0, w, h);
+        if (this.backdropLoaded && this.backdropImage) {
+          ctx.save();
+          ctx.globalAlpha = this.backdropOpacity;
+          ctx.drawImage(this.backdropImage, 0, 0, w, h);
+          ctx.restore();
+        }
       }
     }
 
+    // Coordinate conversion centered on targetMerc at current zoom
+    const zoomScale = Math.pow(2, currentZoom) * 256;
+    const toScreen = (mx, my) => ({
+      x: w / 2 + (mx - targetMerc.x) * zoomScale,
+      y: h / 2 + (my - targetMerc.y) * zoomScale
+    });
+
+    // Vector LOD layers
+    if (this.vectorLayers) {
+      this.drawLODLayers(ctx, toScreen);
+    }
+
+    // Smoothed route underlay
     if (this.spotlight.showRoute && this.gpxData && this.gpxData.points) {
-      const points = this.gpxData.points;
+      const points = this.getSmoothedPoints();
       ctx.beginPath();
       for (let i = 0; i < points.length; i++) {
-        const pix = this.gpxToMapPixels(points[i].merc_x, points[i].merc_y);
-        if (i === 0) ctx.moveTo(pix.x, pix.y);
-        else ctx.lineTo(pix.x, pix.y);
+        const pt = toScreen(points[i].merc_x, points[i].merc_y);
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
       }
       ctx.strokeStyle = this.colors.path;
-      ctx.lineWidth = this.lineWidth / currentZoom;
+      ctx.lineWidth = Math.max(3, this.lineWidth * s);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       ctx.stroke();
     }
 
     // Pulsing Beacon on Spotlight Center
-    this.drawPulsingRiderDot(ctx, targetPix.x, targetPix.y, 1.0 / currentZoom);
+    this.drawPulsingRiderDot(ctx, w / 2, h / 2, s);
 
     ctx.restore();
 
     // Spotlight Title Card
-    const cardW = 340 * s;
-    const cardH = 64 * s;
+    const cardW = 380 * s;
+    const cardH = 68 * s;
     const cardX = (w - cardW) / 2;
-    const cardY = 50 * s;
+    const cardY = 48 * s;
 
     ctx.fillStyle = this.colors.cardBg;
     ctx.strokeStyle = this.colors.path;
@@ -613,8 +1008,8 @@ class CanvasRenderer {
     ctx.fillText(`🔍 ${this.spotlight.targetName}`, cardX + cardW / 2, cardY + 28 * s);
 
     ctx.fillStyle = this.colors.textDim;
-    ctx.font = `600 ${10.5 * s}px JetBrains Mono`;
-    ctx.fillText(`${this.spotlight.targetLat.toFixed(3)}°N, ${this.spotlight.targetLon.toFixed(3)}°E • Zoom ${currentZoom.toFixed(1)}x`, cardX + cardW / 2, cardY + 48 * s);
+    ctx.font = `600 ${11 * s}px JetBrains Mono`;
+    ctx.fillText(`${this.spotlight.targetLat.toFixed(5)}°N, ${this.spotlight.targetLon.toFixed(5)}°E • Detail ${currentZoom.toFixed(1)}x`, cardX + cardW / 2, cardY + 50 * s);
   }
 
   // --- STYLE B: GTA RADAR VECTOR MAP RENDERER ---
@@ -1278,12 +1673,8 @@ class CanvasRenderer {
       valStr = `+${Math.round(gain * (distKm / (this.gpxData ? this.gpxData.total_distance_km : 1)))}`;
       unitStr = 'm';
     } else if (slotCfg.type === 'time') {
-      const speedKmH = 24.0;
-      const hours = distKm / speedKmH;
-      const hInt = Math.floor(hours);
-      const mInt = Math.floor((hours - hInt) * 60);
-      valStr = `${String(hInt).padStart(2, '0')}:${String(mInt).padStart(2, '0')}`;
-      unitStr = 'h';
+      valStr = this.getTimeAtDist(distKm);
+      unitStr = '';
     } else if (slotCfg.type === 'speed') {
       valStr = '26.8';
       unitStr = 'km/h';
@@ -1298,14 +1689,15 @@ class CanvasRenderer {
 
     // 3. Tabular numerals with baseline alignment — GUARANTEED no overlap!
     ctx.fillStyle = valColor;
-    ctx.font = `800 ${19 * s}px JetBrains Mono`;
+    ctx.font = `800 ${18 * s}px JetBrains Mono`;
+    ctx.textAlign = 'left';
     ctx.fillText(valStr, x, y + 36 * s);
 
     if (unitStr) {
       const numWidth = ctx.measureText(valStr).width;
-      ctx.fillStyle = this.colors.path;
-      ctx.font = `700 ${11 * s}px Inter, sans-serif`;
-      ctx.fillText(unitStr, x + numWidth + 7 * s, y + 34 * s);
+      ctx.fillStyle = this.colors.units || '#38bdf8';
+      ctx.font = `700 ${10.5 * s}px Inter, sans-serif`;
+      ctx.fillText(unitStr, x + numWidth + 5 * s, y + 36 * s);
     }
   }
 
@@ -1420,73 +1812,85 @@ class CanvasRenderer {
     const ctx = this.ctx;
     const w = this.width;
     const h = this.height;
+    const s = this.hudScale;
 
-    const riderPix = this.gpxToMapPixels(curMercX, curMercY);
+    // Dynamic zoom evaluated from Zoom Ramp curve!
+    const rampZoom = this.getZoomAtProgress(this.progress);
+    const tileZoom = Math.max(9, Math.min(18, 12.0 + rampZoom * 1.1));
 
-    if ((this.camX === 0 && this.camY === 0) || isNaN(this.camX) || isNaN(this.camY)) {
-      this.camX = riderPix.x;
-      this.camY = riderPix.y;
+    if ((this.camMercX === undefined) || (this.camMercX === 0 && this.camMercY === 0) || isNaN(this.camMercX)) {
+      this.camMercX = curMercX;
+      this.camMercY = curMercY;
     } else {
       const damp = (this.camDamping !== undefined && !isNaN(this.camDamping)) ? this.camDamping : 0.10;
-      this.camX += (riderPix.x - this.camX) * damp;
-      this.camY += (riderPix.y - this.camY) * damp;
+      this.camMercX += (curMercX - this.camMercX) * damp;
+      this.camMercY += (curMercY - this.camMercY) * damp;
     }
 
     let targetHeading = 0;
     if (this.followHeading) {
-      const pix0 = this.gpxToMapPixels(p0.merc_x, p0.merc_y);
-      const pix1 = this.gpxToMapPixels(p1.merc_x, p1.merc_y);
-      targetHeading = Math.atan2(pix1.y - pix0.y, pix1.x - pix0.x) - Math.PI / 2;
+      targetHeading = Math.atan2(p1.merc_y - p0.merc_y, p1.merc_x - p0.merc_x) - Math.PI / 2;
     }
     this.camHeading += (targetHeading - this.camHeading) * 0.08;
 
     ctx.save();
-    ctx.translate(w / 2, h / 2);
-    ctx.scale(this.camZoom, this.camZoom);
-    if (this.followHeading) ctx.rotate(-this.camHeading);
-    ctx.translate(-this.camX, -this.camY);
+    if (this.followHeading) {
+      ctx.translate(w / 2, h / 2);
+      ctx.rotate(-this.camHeading);
+      ctx.translate(-w / 2, -h / 2);
+    }
 
-    // 1. Stitched Map Panorama or Vector Map
+    // 1. Background Map: Slippy Tile Engine or Vector Map
     if (this.toggles.bgMap) {
       if (this.mapStyle === 'vector' && this.vectorLayers) {
-        this.renderVectorMapCorridor(ctx, w, h);
-      } else if (this.mapLoaded && this.mapImage) {
-        ctx.drawImage(this.mapImage, 0, 0);
+        const toScreen = (mx, my) => this.mercToScreenTiles(mx, my, this.camMercX, this.camMercY, tileZoom, w, h);
+        this.drawLODLayers(ctx, toScreen);
+      } else {
+        this.drawSlippyMap(ctx, this.camMercX, this.camMercY, tileZoom, w, h);
       }
     }
 
-    // 2. Full Route Path
-    const points = this.gpxData.points;
+    // 2. Full Route Path (Smoothed)
+    const points = this.getSmoothedPoints();
     const n = points.length;
 
     ctx.beginPath();
     for (let i = 0; i < n; i++) {
-      const pix = this.gpxToMapPixels(points[i].merc_x, points[i].merc_y);
-      if (i === 0) ctx.moveTo(pix.x, pix.y);
-      else ctx.lineTo(pix.x, pix.y);
+      const pt = this.mercToScreenTiles(points[i].merc_x, points[i].merc_y, this.camMercX, this.camMercY, tileZoom, w, h);
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
     }
     ctx.strokeStyle = this.colors.trail;
-    ctx.lineWidth = Math.max(2, this.lineWidth * 0.8);
+    ctx.lineWidth = Math.max(2.5, this.lineWidth * 0.8 * s);
     ctx.stroke();
 
     // 3. Active Glowing Path
     ctx.save();
     if (this.colors.glowIntensity > 0) {
       ctx.shadowColor = this.colors.path;
-      ctx.shadowBlur = this.colors.glowIntensity * 8;
+      ctx.shadowBlur = this.colors.glowIntensity * 8 * s;
     }
     ctx.beginPath();
     const startIdx = Math.floor(this.trimIn * (n - 1));
     for (let i = startIdx; i <= riderIdx; i++) {
-      const pix = this.gpxToMapPixels(points[i].merc_x, points[i].merc_y);
-      if (i === startIdx) ctx.moveTo(pix.x, pix.y);
-      else ctx.lineTo(pix.x, pix.y);
+      const pt = this.mercToScreenTiles(points[i].merc_x, points[i].merc_y, this.camMercX, this.camMercY, tileZoom, w, h);
+      if (i === startIdx) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
     }
-    ctx.lineTo(riderPix.x, riderPix.y);
+    const tip = this.mercToScreenTiles(curMercX, curMercY, this.camMercX, this.camMercY, tileZoom, w, h);
+    ctx.lineTo(tip.x, tip.y);
     ctx.strokeStyle = this.colors.path;
-    ctx.lineWidth = this.lineWidth;
+    ctx.lineWidth = this.lineWidth * s;
     ctx.stroke();
     ctx.restore();
+
+    // 4. Rider Beacon
+    if (this.toggles.riderDot) {
+      this.drawPulsingRiderDot(ctx, tip.x, tip.y, s);
+    }
+
+    ctx.restore();
+  }
 
     // 4. Start & Finish Badges on Map
     const startPix = this.gpxToMapPixels(points[0].merc_x, points[0].merc_y);
