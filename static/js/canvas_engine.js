@@ -2026,6 +2026,8 @@ class CanvasRenderer {
     const barY = layout.y;
 
     ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
     ctx.fillStyle = this.colors.cardBg;
     ctx.strokeStyle = this.colors.cardBorder;
     ctx.lineWidth = 1.5 * s;
@@ -2062,6 +2064,8 @@ class CanvasRenderer {
     const boxH = layout.h * s;
 
     ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
 
     // Glass Container
     ctx.fillStyle = this.colors.cardBg;
@@ -2325,6 +2329,9 @@ class CanvasRenderer {
     const graphH = layout.h * s;
 
     ctx.save();
+    // Guarantee ZERO glow/shadow leak from route or rider beacon
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
 
     // Glass Background
     ctx.fillStyle = this.colors.cardBg;
@@ -2468,6 +2475,9 @@ class CanvasRenderer {
     const cardH = layout.h * s;
 
     ctx.save();
+    // Guarantee ZERO glow/shadow leak from route or rider beacon
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
 
     // Card Glass Background
     ctx.fillStyle = this.colors.cardBg;
@@ -2479,6 +2489,8 @@ class CanvasRenderer {
 
     // Header label - strictly left-aligned with card
     ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = this.colors.textDim;
@@ -2495,7 +2507,7 @@ class CanvasRenderer {
 
     const colW = (cardW - 36 * s) / 3;
 
-    // Render each slot with guaranteed non-overlapping typography
+    // Render each slot with guaranteed non-overlapping typography and zero glow
     this.drawTelemetrySlot(ctx, cardX + 18 * s, cardY + 32 * s, colW, this.telemetry.slot1, distKm, eleM, gradePct, s);
     this.drawTelemetrySlot(ctx, cardX + 18 * s + colW, cardY + 32 * s, colW, this.telemetry.slot2, distKm, eleM, gradePct, s);
     this.drawTelemetrySlot(ctx, cardX + 18 * s + colW * 2, cardY + 32 * s, colW, this.telemetry.slot3, distKm, eleM, gradePct, s);
@@ -2504,6 +2516,10 @@ class CanvasRenderer {
   }
 
   drawTelemetrySlot(ctx, x, y, colW, slotCfg, distKm, eleM, gradePct, s) {
+    ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+
     // 1. Label
     ctx.fillStyle = this.colors.textDim;
     ctx.font = `600 ${9 * s}px Inter, sans-serif`;
@@ -2534,7 +2550,7 @@ class CanvasRenderer {
     } else if (slotCfg.type === 'grade') {
       valStr = `${gradePct >= 0 ? '+' : ''}${gradePct.toFixed(1)}`;
       unitStr = '%';
-      valColor = gradePct >= 6.0 ? '#ef4444' : (gradePct >= 3.0 ? '#ffb703' : '#00f0ff');
+      valColor = gradePct >= 6.0 ? '#ef4444' : (gradePct >= 3.0 ? '#ffb703' : this.colors.text);
     } else {
       valStr = '00:00';
       unitStr = '';
@@ -2552,6 +2568,7 @@ class CanvasRenderer {
       ctx.font = `700 ${10.5 * s}px Inter, sans-serif`;
       ctx.fillText(unitStr, x + numWidth + 5 * s, y + 36 * s);
     }
+    ctx.restore();
   }
 
   // --- ANIMATED CLOCK WIDGET ---
@@ -2566,6 +2583,8 @@ class CanvasRenderer {
     const clockH = layout.h * s;
 
     ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
     ctx.fillStyle = this.colors.cardBg;
     ctx.strokeStyle = this.colors.cardBorder;
     ctx.lineWidth = 1.5 * s;
@@ -2827,6 +2846,10 @@ class CanvasRenderer {
 
   // --- PULSING RIDER DOT ---
   drawPulsingRiderDot(ctx, x, y, s) {
+    ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+
     const pulse1 = (this.pulsePhase % 2.0) / 2.0;
     const pulse2 = ((this.pulsePhase + 1.0) % 2.0) / 2.0;
 
@@ -2852,6 +2875,10 @@ class CanvasRenderer {
     ctx.beginPath();
     ctx.arc(x, y, this.dotSize * 0.45 * s, 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.restore();
   }
 
   // --- ON-CANVAS SELECTION GIZMO & SAFE ZONES ---
