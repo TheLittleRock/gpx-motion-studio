@@ -214,34 +214,91 @@
 
         <!-- TAB 2: STYLES & ELEMENTS -->
         <div class="inspector-tab-pane" id="paneStyles">
-          <div class="section-title">Nezávislé Barvy Prvků</div>
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+          <div class="section-title">Doporučené Barevné Palety</div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-bottom:14px;">
+            <button class="theme-preset-btn" data-theme="cyber">
+              <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#00f0ff;"></span>
+              <span>⚡ Cyber Cyan</span>
+            </button>
+            <button class="theme-preset-btn" data-theme="forest">
+              <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#39ff14;"></span>
+              <span>🌿 Outdoor Forest</span>
+            </button>
+            <button class="theme-preset-btn" data-theme="sunset">
+              <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#f59e0b;"></span>
+              <span>🌅 Sunset Ridge</span>
+            </button>
+            <button class="theme-preset-btn" data-theme="minimal">
+              <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#ffffff;"></span>
+              <span>⚪ Minimal White</span>
+            </button>
+          </div>
+
+          <div class="section-title">Nezávislé Barvy Prvků & Vzorník</div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:14px;">
+            <!-- Path Color -->
             <div class="form-group" style="margin-bottom:0;">
               <div class="form-label"><span>Aktivní trasa</span></div>
               <div style="display:flex; align-items:center; gap:8px;">
                 <input type="color" id="colorPath" value="#00F0FF" class="color-picker-input">
                 <span class="form-val" id="colorPathVal">#00F0FF</span>
               </div>
+              <div class="color-presets" data-target="colorPath">
+                <div class="color-swatch" style="background:#00F0FF;" title="Electric Cyan" data-color="#00F0FF"></div>
+                <div class="color-swatch" style="background:#39FF14;" title="Neon Lime" data-color="#39FF14"></div>
+                <div class="color-swatch" style="background:#FFB703;" title="Amber Gold" data-color="#FFB703"></div>
+                <div class="color-swatch" style="background:#FFFFFF;" title="Ultra White" data-color="#FFFFFF"></div>
+                <div class="color-swatch" style="background:#FF3B30;" title="Crimson Red" data-color="#FF3B30"></div>
+                <div class="color-swatch" style="background:#A855F7;" title="Neon Purple" data-color="#A855F7"></div>
+              </div>
             </div>
+
+            <!-- Elevation Color -->
             <div class="form-group" style="margin-bottom:0;">
               <div class="form-label"><span>Výškový profil</span></div>
               <div style="display:flex; align-items:center; gap:8px;">
                 <input type="color" id="colorElevation" value="#FFB703" class="color-picker-input">
                 <span class="form-val" id="colorElevationVal">#FFB703</span>
               </div>
+              <div class="color-presets" data-target="colorElevation">
+                <div class="color-swatch" style="background:#FFB703;" title="Amber Gold" data-color="#FFB703"></div>
+                <div class="color-swatch" style="background:#10B981;" title="Emerald Green" data-color="#10B981"></div>
+                <div class="color-swatch" style="background:#00F0FF;" title="Sky Blue" data-color="#00F0FF"></div>
+                <div class="color-swatch" style="background:#F97316;" title="Sunset Orange" data-color="#F97316"></div>
+                <div class="color-swatch" style="background:#EF4444;" title="Coral Red" data-color="#EF4444"></div>
+                <div class="color-swatch" style="background:#6366F1;" title="Indigo" data-color="#6366F1"></div>
+              </div>
             </div>
+
+            <!-- Text Color -->
             <div class="form-group" style="margin-bottom:0;">
               <div class="form-label"><span>Texty & Hodnoty</span></div>
               <div style="display:flex; align-items:center; gap:8px;">
                 <input type="color" id="colorText" value="#FFFFFF" class="color-picker-input">
                 <span class="form-val" id="colorTextVal">#FFFFFF</span>
               </div>
+              <div class="color-presets" data-target="colorText">
+                <div class="color-swatch" style="background:#FFFFFF;" title="Pure White" data-color="#FFFFFF"></div>
+                <div class="color-swatch" style="background:#F0F6FC;" title="Light Slate" data-color="#F0F6FC"></div>
+                <div class="color-swatch" style="background:#E0F2FE;" title="Cyan Tint" data-color="#E0F2FE"></div>
+                <div class="color-swatch" style="background:#FEF3C7;" title="Warm Cream" data-color="#FEF3C7"></div>
+                <div class="color-swatch" style="background:#CBD5E1;" title="Soft Gray" data-color="#CBD5E1"></div>
+              </div>
             </div>
+
+            <!-- River Color -->
             <div class="form-group" style="margin-bottom:0;">
               <div class="form-label"><span>Řeky (Vltava atd.)</span></div>
               <div style="display:flex; align-items:center; gap:8px;">
                 <input type="color" id="colorRiver" value="#00A8FF" class="color-picker-input">
                 <span class="form-val" id="colorRiverVal">#00A8FF</span>
+              </div>
+              <div class="color-presets" data-target="colorRiver">
+                <div class="color-swatch" style="background:#00A8FF;" title="Vibrant River Blue" data-color="#00A8FF"></div>
+                <div class="color-swatch" style="background:#1D4ED8;" title="Deep Royal Blue" data-color="#1D4ED8"></div>
+                <div class="color-swatch" style="background:#06B6D4;" title="Aqua Cyan" data-color="#06B6D4"></div>
+                <div class="color-swatch" style="background:#0D9488;" title="Teal Green" data-color="#0D9488"></div>
+                <div class="color-swatch" style="background:#64748B;" title="Steel Slate" data-color="#64748B"></div>
               </div>
             </div>
           </div>
@@ -339,14 +396,25 @@
             ⚡ Vygenerovat čistou mapu trasy
           </button>
 
-          <div class="section-title">Bezpečné Uložení Mapy.com API Klíče</div>
-          <div class="form-group">
-            <div style="display:flex; gap:6px;">
-              <input type="password" id="mapyApiKeyInput" placeholder="Vložte API Klíč (developer.mapy.com)" class="tool-btn" style="flex:1; height:30px; text-align:left; background:var(--bg-input); font-family:var(--font-mono); font-size:10.5px;">
-              <button class="btn btn-secondary" id="btnSaveApiKey" style="padding:4px 10px;">Uložit</button>
+          <div class="section-title">
+            <span>Mapy.com REST API & Připojení</span>
+            <span id="mapyApiStatusBadge" class="api-status-badge disconnected">⚪ BEZ KLÍČE (CyclOSM)</span>
+          </div>
+          <div style="background:var(--bg-input); padding:12px; border-radius:6px; border:1px solid var(--border-color); margin-bottom:14px;">
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.4;">
+              Oficiální API klíč z <strong>developer.mapy.com</strong> odemyká podrobné turistické mapy, vrstevnice a letecké snímky v retina rozlišení.
             </div>
-            <div style="font-size:10px; color:var(--text-dim); margin-top:4px;" id="apiKeyStatusText">
-              Klíč je bezpečně uložen v lokální SQLite databázi a nikdy se neposílá na GitHub.
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+              <input type="password" id="mapyApiKeyInput" placeholder="Vložte Mapy.com API klíč..." class="tool-btn" style="flex:1; height:32px; text-align:left; background:var(--bg-panel); font-family:var(--font-mono); font-size:11px; padding:0 8px;">
+              <button class="btn btn-secondary" id="btnToggleShowApiKey" title="Zobrazit / Skrýt klíč" style="padding:4px 8px;">👁️</button>
+            </div>
+            <div style="display:flex; gap:6px; margin-bottom:8px;">
+              <button class="btn btn-primary" id="btnSaveApiKey" style="flex:1; justify-content:center; padding:5px 8px;">💾 Uložit klíč</button>
+              <button class="btn btn-emerald" id="btnTestApiKey" style="flex:1; justify-content:center; padding:5px 8px;">🔍 Otestovat spojení</button>
+              <button class="btn btn-secondary" id="btnDeleteApiKey" style="padding:5px 8px; color:var(--accent-danger);" title="Odstranit klíč">🗑️</button>
+            </div>
+            <div style="font-size:10.5px; color:var(--text-dim); line-height:1.3;" id="apiKeyStatusText">
+              Klíč je bezpečně uložen v lokální SQLite databázi <code>./data/projects.db</code> a nikdy se neposílá na GitHub.
             </div>
           </div>
 

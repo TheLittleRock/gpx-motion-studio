@@ -86,7 +86,7 @@ class ProjectDuplicateRequest(BaseModel):
     name: Optional[str] = None
 
 class ApiKeyRequest(BaseModel):
-    apikey: str
+    apikey: Optional[str] = None
 
 @app.get("/")
 async def root():
@@ -292,6 +292,54 @@ async def save_api_key(req: ApiKeyRequest):
     """Saves Mapy.com API key securely in the local SQLite database."""
     db.set_app_setting("mapy_api_key", req.apikey.strip())
     return {"status": "success", "message": "API klíč Mapy.com úspěšně uložen"}
+
+@app.post("/api/settings/test-mapy-key")
+async def test_mapy_key(req: Optional[ApiKeyRequest] = None):
+    """Tests Mapy.com REST API key against live server."""
+    key = (req.apikey.strip() if req and req.apikey else None) or db.get_app_setting("mapy_api_key", "")
+    if not key:
+        return {"status": "missing", "valid": False, "message": "Není zadán žádný API klíč Mapy.com"}
+
+    url = f"https://api.mapy.cz/v1/maptiles/basic/256/11/1108/713?apikey={key}"
+    import urllib.request
+    import urllib.error
+    headers = {"User-Agent": "Rekola-Studio/2.0"}
+    try:
+        req_obj = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req_obj, timeout=6) as response:
+            if response.status == 200:
+                masked = (key[:4] + "..." + key[-4:]) if len(key) >= 8 else key
+                return {
+                    "status": "connected",
+                    "valid": True,
+                    "masked": masked,
+                    "message": "✓ Spojení s Mapy.com API je aktivní a ověřeno!",
+                    "provider": "Mapy.com REST API"
+                }
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return {
+                "status": "unauthorized",
+                "valid": False,
+                "message": f"Neplatný API klíč Mapy.com (Chyba HTTP {e.code}). Ověřte klíč na developer.mapy.com."
+            }
+        return {
+            "status": "error",
+            "valid": False,
+            "message": f"Mapy.com API vrátilo kód HTTP {e.code}"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "valid": False,
+            "message": f"Chyba připojení k serveru Mapy.com: {str(e)}"
+        }
+
+@app.delete("/api/settings/api-key")
+async def delete_api_key():
+    """Removes stored Mapy.com API key."""
+    db.set_app_setting("mapy_api_key", "")
+    return {"status": "deleted", "message": "API klíč byl odstraněn. Aktivována výchozí mapa CyclOSM bez vodoznaku."}
 
 @app.get("/api/rivers")
 async def get_rivers():

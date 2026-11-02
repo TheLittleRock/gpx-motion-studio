@@ -161,11 +161,11 @@ class ProjectDatabase:
                 "slot3": {"type": "time", "label": "ČAS JÍZDY"}
             },
             "layout": {
-                "telemetry": {"x": 40, "y": 40, "scale": 1.0, "visible": True},
-                "elevation": {"x": 40, "y": 880, "scale": 1.0, "visible": True},
-                "minimap": {"x": 1460, "y": 640, "scale": 1.0, "visible": True},
-                "clock": {"x": 860, "y": 40, "scale": 1.0, "visible": False},
-                "banner": {"x": 620, "y": 40, "scale": 1.0, "visible": True}
+                "telemetry": {"x": 40, "y": 40, "w": 380, "h": 92, "scale": 1.0, "visible": True},
+                "elevation": {"x": 40, "y": 880, "w": 1200, "h": 160, "scale": 1.0, "visible": True},
+                "minimap": {"x": 1460, "y": 640, "w": 420, "h": 400, "scale": 1.0, "visible": True},
+                "clock": {"x": 840, "y": 40, "w": 240, "h": 64, "scale": 1.0, "visible": False},
+                "banner": {"x": 600, "y": 40, "w": 720, "h": 56, "scale": 1.0, "visible": True}
             }
         }
         return self.create_project("Výlet Praha – České Budějovice", default_settings, active_gpx="full_rekola_route.gpx")

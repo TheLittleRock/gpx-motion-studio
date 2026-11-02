@@ -138,6 +138,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Map & Camera
   const mapyApiKeyInput = document.getElementById('mapyApiKeyInput');
   const btnSaveApiKey = document.getElementById('btnSaveApiKey');
+  const btnTestApiKey = document.getElementById('btnTestApiKey');
+  const btnDeleteApiKey = document.getElementById('btnDeleteApiKey');
+  const btnToggleShowApiKey = document.getElementById('btnToggleShowApiKey');
+  const mapyApiStatusBadge = document.getElementById('mapyApiStatusBadge');
   const apiKeyStatusText = document.getElementById('apiKeyStatusText');
   const btnQuickStitch = document.getElementById('btnQuickStitch');
   const camZoomSlider = document.getElementById('camZoomSlider');
@@ -304,7 +308,21 @@ document.addEventListener('DOMContentLoaded', () => {
         hudScaleVal.textContent = `${s.hudScale.toFixed(2)}x`;
       }
       if (s.layout) {
-        renderer.hudLayout = { ...renderer.hudLayout, ...s.layout };
+        for (const [k, v] of Object.entries(s.layout)) {
+          if (renderer.hudLayout[k]) {
+            renderer.hudLayout[k] = { ...renderer.hudLayout[k], ...v };
+          } else {
+            renderer.hudLayout[k] = { ...v };
+          }
+        }
+      }
+
+      // Restore Animation Mode
+      if (proj.animation_mode) {
+        renderer.animationMode = proj.animation_mode;
+        animModeSelect.value = proj.animation_mode;
+      } else {
+        renderer.animationMode = animModeSelect.value || 'flyover';
       }
 
       // Restore Speed Keyframes
@@ -384,30 +402,155 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast(`Projekt přejmenován na: ${newName}`);
   });
 
-  // Save Mapy API key securely
+  // Mapy.com API Management with visual verification & confirmation
+  async function testMapyApiKey(keyToTest = null) {
+    if (mapyApiStatusBadge) {
+      mapyApiStatusBadge.className = 'api-status-badge';
+      mapyApiStatusBadge.textContent = '⏳ TESTUJI SPOJENÍ...';
+      mapyApiStatusBadge.style.color = '#ffb703';
+    }
+    if (apiKeyStatusText) {
+      apiKeyStatusText.textContent = 'Ověřuji spojení se servery api.mapy.cz...';
+      apiKeyStatusText.style.color = 'var(--text-muted)';
+    }
+
+    try {
+      const resp = await fetch('/api/settings/test-mapy-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apikey: keyToTest || null })
+      });
+      const data = await resp.json();
+
+      if (data.status === 'connected' && data.valid) {
+        if (mapyApiStatusBadge) {
+          mapyApiStatusBadge.className = 'api-status-badge connected';
+          mapyApiStatusBadge.textContent = '🟢 PŘIPOJENO (Mapy.com API)';
+        }
+        if (apiKeyStatusText) {
+          apiKeyStatusText.innerHTML = `✓ <strong>Spojení ověřeno (klíč: ${data.masked})</strong>. Oficiální turistické mapy, vrstevnice a letecké snímky v retina rozlišení jsou odemčeny.`;
+          apiKeyStatusText.style.color = 'var(--accent-emerald)';
+        }
+        return true;
+      } else if (data.status === 'unauthorized') {
+        if (mapyApiStatusBadge) {
+          mapyApiStatusBadge.className = 'api-status-badge error';
+          mapyApiStatusBadge.textContent = '🔴 NEPLATNÝ KLÍČ (Chyba 403)';
+        }
+        if (apiKeyStatusText) {
+          apiKeyStatusText.textContent = '✕ Zadaný klíč nebyl servery Mapy.com přijat (HTTP 403 Forbidden). Zkontrolujte platnost na developer.mapy.com.';
+          apiKeyStatusText.style.color = 'var(--accent-danger)';
+        }
+        return false;
+      } else {
+        if (mapyApiStatusBadge) {
+          mapyApiStatusBadge.className = 'api-status-badge disconnected';
+          mapyApiStatusBadge.textContent = '⚪ BEZ KLÍČE (CyclOSM fallback)';
+        }
+        if (apiKeyStatusText) {
+          apiKeyStatusText.textContent = 'Není zadán žádný API klíč. Aplikace funguje s bezplatným mapovým podkladem CyclOSM / OpenTopoMap.';
+          apiKeyStatusText.style.color = 'var(--text-dim)';
+        }
+        return false;
+      }
+    } catch (err) {
+      if (mapyApiStatusBadge) {
+        mapyApiStatusBadge.className = 'api-status-badge error';
+        mapyApiStatusBadge.textContent = '🔴 CHYBA SPOJENÍ';
+      }
+      if (apiKeyStatusText) {
+        apiKeyStatusText.textContent = `Chyba při komunikaci se serverem: ${err.message}`;
+        apiKeyStatusText.style.color = 'var(--accent-danger)';
+      }
+      return false;
+    }
+  }
+
   async function loadApiKeyStatus() {
     try {
       const resp = await fetch('/api/settings/api-key');
       const data = await resp.json();
       if (data.has_key) {
-        apiKeyStatusText.textContent = `✓ API Klíč aktivní (${data.masked}) uložen v lokální SQLite databázi.`;
-        apiKeyStatusText.style.color = 'var(--accent-emerald)';
+        await testMapyApiKey();
+      } else {
+        if (mapyApiStatusBadge) {
+          mapyApiStatusBadge.className = 'api-status-badge disconnected';
+          mapyApiStatusBadge.textContent = '⚪ BEZ KLÍČE (CyclOSM)';
+        }
+        if (apiKeyStatusText) {
+          apiKeyStatusText.textContent = 'Aplikace aktuálně používá bezplatné mapy CyclOSM. Vložte svůj klíč z developer.mapy.com pro oficiální turistické mapy.';
+          apiKeyStatusText.style.color = 'var(--text-dim)';
+        }
       }
-    } catch (err) {}
+    } catch (err) {
+      console.warn('API key load err:', err);
+    }
   }
 
-  btnSaveApiKey.addEventListener('click', async () => {
-    const key = mapyApiKeyInput.value.trim();
-    if (!key) return;
-    await fetch('/api/settings/api-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apikey: key })
+  if (btnSaveApiKey) {
+    btnSaveApiKey.addEventListener('click', async () => {
+      const key = mapyApiKeyInput.value.trim();
+      if (!key) {
+        alert('Nejprve prosím vložte API klíč z developer.mapy.com');
+        return;
+      }
+      btnSaveApiKey.disabled = true;
+      btnSaveApiKey.textContent = 'Ukládám...';
+      try {
+        await fetch('/api/settings/api-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apikey: key })
+        });
+        mapyApiKeyInput.value = '';
+        const isValid = await testMapyApiKey(key);
+        if (isValid) {
+          showToast('✓ API klíč Mapy.com úspěšně uložen a spojení ověřeno!');
+        } else {
+          showToast('⚠️ API klíč byl uložen, ale server Mapy.com jej odmítl (Chyba 403)', true);
+        }
+      } finally {
+        btnSaveApiKey.disabled = false;
+        btnSaveApiKey.textContent = '💾 Uložit klíč';
+      }
     });
-    mapyApiKeyInput.value = '';
-    loadApiKeyStatus();
-    showToast('✓ API klíč Mapy.com úspěšně uložen do databáze');
-  });
+  }
+
+  if (btnTestApiKey) {
+    btnTestApiKey.addEventListener('click', async () => {
+      btnTestApiKey.disabled = true;
+      btnTestApiKey.textContent = 'Testuji...';
+      const key = mapyApiKeyInput.value.trim() || null;
+      try {
+        const ok = await testMapyApiKey(key);
+        if (ok) {
+          showToast('✓ Spojení s Mapy.com API je plně funkční!');
+        } else {
+          showToast('✕ Test spojení selhal. Zkontrolujte klíč.', true);
+        }
+      } finally {
+        btnTestApiKey.disabled = false;
+        btnTestApiKey.textContent = '🔍 Otestovat spojení';
+      }
+    });
+  }
+
+  if (btnDeleteApiKey) {
+    btnDeleteApiKey.addEventListener('click', async () => {
+      if (!confirm('Opravdu chcete odstranit uložený API klíč Mapy.com z lokální databáze?')) return;
+      await fetch('/api/settings/api-key', { method: 'DELETE' });
+      mapyApiKeyInput.value = '';
+      await testMapyApiKey(null);
+      showToast('✓ API klíč Mapy.com byl odstraněn');
+    });
+  }
+
+  if (btnToggleShowApiKey) {
+    btnToggleShowApiKey.addEventListener('click', () => {
+      mapyApiKeyInput.type = mapyApiKeyInput.type === 'password' ? 'text' : 'password';
+      btnToggleShowApiKey.textContent = mapyApiKeyInput.type === 'password' ? '👁️' : '🔒';
+    });
+  }
 
   // ==================== 2. TWO MAP STYLES ====================
   function setMapStyle(style) {
@@ -966,7 +1109,7 @@ document.addEventListener('DOMContentLoaded', () => {
     camZoomVal.textContent = '2.2x';
   });
 
-  // File Upload
+  // File Upload & Drag-and-Drop
   gpxSelect.addEventListener('change', (e) => selectGPX(e.target.value));
   mapSelect.addEventListener('change', (e) => selectMap(e.target.value));
 
@@ -980,15 +1123,70 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target.files && e.target.files[0]) handleImportedFile(e.target.files[0]);
   });
 
+  // Dedicated Drag & Drop on Dropzone Box
+  if (dropzoneBox) {
+    ['dragenter', 'dragover'].forEach(evt => {
+      dropzoneBox.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzoneBox.style.borderColor = 'var(--accent-cyan)';
+        dropzoneBox.style.background = 'rgba(0, 240, 255, 0.12)';
+      });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+      dropzoneBox.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzoneBox.style.borderColor = 'var(--border-color)';
+        dropzoneBox.style.background = 'rgba(11, 13, 18, 0.6)';
+      });
+    });
+    dropzoneBox.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleImportedFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  // Canvas Container Drag & Drop
+  if (canvasContainer) {
+    canvasContainer.addEventListener('dragover', (e) => e.preventDefault());
+    canvasContainer.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleImportedFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  // Full Screen Drag & Drop Overlay
   const dropOverlay = document.getElementById('dropOverlay');
-  window.addEventListener('dragenter', (e) => { e.preventDefault(); if (dropOverlay) dropOverlay.classList.add('active'); });
-  window.addEventListener('dragover', (e) => { e.preventDefault(); if (dropOverlay) dropOverlay.classList.add('active'); });
-  window.addEventListener('dragleave', (e) => { e.preventDefault(); if (e.clientX <= 0 || e.clientY <= 0 || !e.relatedTarget) { if (dropOverlay) dropOverlay.classList.remove('active'); } });
-  window.addEventListener('drop', (e) => {
+  window.addEventListener('dragenter', (e) => {
     e.preventDefault();
-    if (dropOverlay) dropOverlay.classList.remove('active');
-    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) handleImportedFile(e.dataTransfer.files[0]);
+    if (dropOverlay) dropOverlay.classList.add('active');
   });
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (dropOverlay) dropOverlay.classList.add('active');
+  });
+  if (dropOverlay) {
+    dropOverlay.addEventListener('dragover', (e) => e.preventDefault());
+    dropOverlay.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      if (e.clientX <= 0 || e.clientY <= 0 || !e.relatedTarget) {
+        dropOverlay.classList.remove('active');
+      }
+    });
+    dropOverlay.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropOverlay.classList.remove('active');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleImportedFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
 
   async function handleImportedFile(file) {
     if (!file) return;
@@ -1008,12 +1206,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (ext === 'gpx') {
+      showToast('Nahrávám a analyzuji trasu GPX...');
       const formData = new FormData();
       formData.append('file', file);
       try {
         const resp = await fetch('/api/upload', { method: 'POST', body: formData });
         const res = await resp.json();
         if (res.status === 'success' && res.gpx_data) {
+          renderer.camX = 0;
+          renderer.camY = 0;
+          renderer.camHeading = 0;
           renderer.setGPXData(res.gpx_data);
           updateHeaderStats(res.gpx_data);
           updateWaypointsUI();
@@ -1022,13 +1224,72 @@ document.addEventListener('DOMContentLoaded', () => {
           finishCityInput.value = renderer.finishCityName;
           state.currentTime = renderer.trimIn * state.durationSec;
           updateTimeDisplay();
-          await loadAssets(res.filename, null);
-          showToast(`✓ Trasa GPX načtena: ${res.gpx_data.name} (${res.gpx_data.total_distance_km} km)`);
+
+          // Persist active_gpx in active SQLite project
+          if (state.currentProjectId) {
+            await fetch(`/api/projects/${state.currentProjectId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ active_gpx: res.filename })
+            });
+          }
+
+          // Ensure it's in the gpxSelect dropdown and selected
+          let exists = false;
+          for (let i = 0; i < gpxSelect.options.length; i++) {
+            if (gpxSelect.options[i].value === res.filename) {
+              gpxSelect.selectedIndex = i;
+              exists = true;
+              break;
+            }
+          }
+          if (!exists) {
+            const opt = document.createElement('option');
+            opt.value = res.filename;
+            opt.textContent = `${res.filename} (${(file.size / 1024).toFixed(1)} KB)`;
+            opt.selected = true;
+            gpxSelect.insertBefore(opt, gpxSelect.firstChild);
+            gpxSelect.selectedIndex = 0;
+          }
+
+          showToast(`✓ Trasa "${res.gpx_data.name}" (${res.gpx_data.total_distance_km} km) úspěšně načtena!`);
+        } else {
+          showToast('Chyba: Nepodařilo se zpracovat GPX data', true);
         }
       } catch (err) {
-        showToast('Chyba při nahrávání GPX', true);
+        showToast('Chyba při nahrávání GPX: ' + err.message, true);
       }
     }
+  }
+
+  // Auto-save project settings to SQLite
+  let saveSettingsTimer = null;
+  function saveCurrentProjectSettings() {
+    if (!state.currentProjectId) return;
+    clearTimeout(saveSettingsTimer);
+    saveSettingsTimer = setTimeout(async () => {
+      try {
+        await fetch(`/api/projects/${state.currentProjectId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            settings: {
+              colors: renderer.colors,
+              hudScale: renderer.hudScale,
+              lineWidth: renderer.lineWidth,
+              markerStyle: renderer.markerStyle,
+              startCityName: renderer.startCityName,
+              finishCityName: renderer.finishCityName,
+              toggles: renderer.toggles,
+              telemetry: renderer.telemetry,
+              layout: renderer.hudLayout
+            }
+          })
+        });
+      } catch (err) {
+        console.warn('Auto-save settings err:', err);
+      }
+    }, 400);
   }
 
   // ==================== 9. INSPECTOR TABS & COLOR CONTROLS ====================
@@ -1043,21 +1304,129 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // 4 Theme Presets
+  const themePresets = {
+    cyber: {
+      name: 'Cyber Cyan',
+      path: '#00F0FF',
+      elevation: '#FFB703',
+      text: '#FFFFFF',
+      river: '#00A8FF',
+      startMarker: '#39FF14',
+      finishMarker: '#00F0FF'
+    },
+    forest: {
+      name: 'Outdoor Forest',
+      path: '#39FF14',
+      elevation: '#10B981',
+      text: '#F0F6FC',
+      river: '#0D9488',
+      startMarker: '#10B981',
+      finishMarker: '#39FF14'
+    },
+    sunset: {
+      name: 'Sunset Ridge',
+      path: '#FF5E00',
+      elevation: '#FFB703',
+      text: '#FEF3C7',
+      river: '#00A8FF',
+      startMarker: '#F97316',
+      finishMarker: '#FFB703'
+    },
+    minimal: {
+      name: 'Minimal White',
+      path: '#FFFFFF',
+      elevation: '#94A3B8',
+      text: '#F8FAFC',
+      river: '#38BDF8',
+      startMarker: '#FFFFFF',
+      finishMarker: '#94A3B8'
+    }
+  };
+
+  document.querySelectorAll('.theme-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const themeKey = btn.dataset.theme;
+      const t = themePresets[themeKey];
+      if (!t) return;
+
+      renderer.colors.path = t.path;
+      renderer.colors.elevation = t.elevation;
+      renderer.colors.text = t.text;
+      renderer.colors.river = t.river;
+      renderer.colors.startMarker = t.startMarker;
+      renderer.colors.finishMarker = t.finishMarker;
+
+      colorPath.value = t.path;
+      colorPathVal.textContent = t.path.toUpperCase();
+      colorElevation.value = t.elevation;
+      colorElevationVal.textContent = t.elevation.toUpperCase();
+      colorText.value = t.text;
+      colorTextVal.textContent = t.text.toUpperCase();
+      colorRiver.value = t.river;
+      colorRiverVal.textContent = t.river.toUpperCase();
+
+      document.querySelectorAll('.theme-preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      saveCurrentProjectSettings();
+      showToast(`✓ Barevný motiv aktivován: ${t.name}`);
+    });
+  });
+
+  // Color Swatches
+  document.querySelectorAll('.color-swatch').forEach(swatch => {
+    swatch.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const parentPreset = swatch.closest('.color-presets');
+      const targetId = parentPreset ? parentPreset.dataset.target : null;
+      const color = swatch.dataset.color;
+      if (!color) return;
+
+      if (targetId === 'colorPath') {
+        colorPath.value = color;
+        colorPathVal.textContent = color.toUpperCase();
+        renderer.colors.path = color;
+      } else if (targetId === 'colorElevation') {
+        colorElevation.value = color;
+        colorElevationVal.textContent = color.toUpperCase();
+        renderer.colors.elevation = color;
+      } else if (targetId === 'colorText') {
+        colorText.value = color;
+        colorTextVal.textContent = color.toUpperCase();
+        renderer.colors.text = color;
+      } else if (targetId === 'colorRiver') {
+        colorRiver.value = color;
+        colorRiverVal.textContent = color.toUpperCase();
+        renderer.colors.river = color;
+      }
+
+      parentPreset.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+      swatch.classList.add('active');
+
+      saveCurrentProjectSettings();
+    });
+  });
+
   colorPath.addEventListener('input', (e) => {
     renderer.colors.path = e.target.value;
     colorPathVal.textContent = e.target.value.toUpperCase();
+    saveCurrentProjectSettings();
   });
   colorElevation.addEventListener('input', (e) => {
     renderer.colors.elevation = e.target.value;
     colorElevationVal.textContent = e.target.value.toUpperCase();
+    saveCurrentProjectSettings();
   });
   colorText.addEventListener('input', (e) => {
     renderer.colors.text = e.target.value;
     colorTextVal.textContent = e.target.value.toUpperCase();
+    saveCurrentProjectSettings();
   });
   colorRiver.addEventListener('input', (e) => {
     renderer.colors.river = e.target.value;
     colorRiverVal.textContent = e.target.value.toUpperCase();
+    saveCurrentProjectSettings();
   });
 
   markerStyleSelect.addEventListener('change', (e) => renderer.markerStyle = e.target.value);

@@ -185,6 +185,9 @@ class CanvasRenderer {
   setGPXData(data) {
     this.gpxData = data;
     this.waypoints = data.suggested_waypoints ? [...data.suggested_waypoints] : [];
+    this.camX = 0;
+    this.camY = 0;
+    this.camHeading = 0;
 
     if (data.name) {
       if (data.name.includes(' do ')) {
@@ -272,18 +275,57 @@ class CanvasRenderer {
   }
 
   gpxToMapPixels(merc_x, merc_y) {
-    if (!this.calibration.matrix) return { x: 0, y: 0 };
-    const m = this.calibration.matrix;
-    const dx = merc_x - m.gpxX0;
-    const dy = merc_y - m.gpxY0;
+    if (this.mapLoaded && this.mapImage && this.mapMetadata && this.mapMetadata.min_mx !== undefined) {
+      const meta = this.mapMetadata;
+      const spanMx = (meta.max_mx - meta.min_mx) || 0.00001;
+      const spanMy = (meta.max_my - meta.min_my) || 0.00001;
+      const imgW = this.mapImage.naturalWidth || this.mapImage.width || meta.width || 1920;
+      const imgH = this.mapImage.naturalHeight || this.mapImage.height || meta.height || 1080;
+      
+      const baseX = ((merc_x - meta.min_mx) / spanMx) * imgW;
+      const baseY = ((merc_y - meta.min_my) / spanMy) * imgH;
+      
+      const sNudge = (this.calibration && this.calibration.scaleNudge) ? this.calibration.scaleNudge : 1.0;
+      const offX = (this.calibration && this.calibration.offsetX) ? this.calibration.offsetX : 0;
+      const offY = (this.calibration && this.calibration.offsetY) ? this.calibration.offsetY : 0;
+      
+      return {
+        x: baseX * sNudge + offX,
+        y: baseY * sNudge + offY
+      };
+    }
 
-    const rx = m.scale * (dx * m.cosR - dy * m.sinR);
-    const ry = m.scale * (dx * m.sinR + dy * m.cosR);
+    if (this.calibration && this.calibration.matrix) {
+      const m = this.calibration.matrix;
+      const dx = merc_x - m.gpxX0;
+      const dy = merc_y - m.gpxY0;
+      const rx = m.scale * (dx * m.cosR - dy * m.sinR);
+      const ry = m.scale * (dx * m.sinR + dy * m.cosR);
+      return {
+        x: m.pixX0 + rx,
+        y: m.pixY0 + ry
+      };
+    }
 
-    return {
-      x: m.pixX0 + rx,
-      y: m.pixY0 + ry
-    };
+    // Direct canvas fallback using GPX bounds
+    if (this.gpxData && this.gpxData.bounds) {
+      const b = this.gpxData.bounds;
+      const spanX = (b.max_mx - b.min_mx) || 0.0001;
+      const spanY = (b.max_my - b.min_my) || 0.0001;
+      const marginX = this.width * 0.12;
+      const marginY = this.height * 0.12;
+      const usableW = this.width - marginX * 2;
+      const usableH = this.height - marginY * 2;
+      const scale = Math.min(usableW / spanX, usableH / spanY);
+      const ox = marginX + (usableW - spanX * scale) / 2;
+      const oy = marginY + (usableH - spanY * scale) / 2;
+      return {
+        x: ox + (merc_x - b.min_mx) * scale,
+        y: oy + (merc_y - b.min_my) * scale
+      };
+    }
+
+    return { x: this.width / 2, y: this.height / 2 };
   }
 
   latLonToMercator(lat, lon) {
@@ -499,7 +541,7 @@ class CanvasRenderer {
     }
 
     // 10. Route Header Banner
-    if (this.hudLayout.banner.visible) {
+    if (this.getWidgetLayout('banner').visible) {
       this.drawFullscreenBanner(ctx, w, h, s, dist, points[n - 1].dist_km);
     }
 
@@ -876,8 +918,28 @@ class CanvasRenderer {
     ctx.restore();
   }
 
+  getWidgetLayout(key) {
+    const defaults = {
+      telemetry: { x: 40, y: 40, w: 380, h: 92, scale: 1.0, visible: true },
+      elevation: { x: 40, y: 880, w: 1200, h: 160, scale: 1.0, visible: true },
+      minimap:   { x: 1460, y: 640, w: 420, h: 400, scale: 1.0, visible: true },
+      clock:     { x: 840, y: 40, w: 240, h: 64, scale: 1.0, visible: false },
+      banner:    { x: 600, y: 40, w: 720, h: 56, scale: 1.0, visible: true }
+    };
+    const def = defaults[key] || { x: 40, y: 40, w: 300, h: 100, scale: 1.0, visible: true };
+    const cur = (this.hudLayout && this.hudLayout[key]) ? this.hudLayout[key] : {};
+    return {
+      x: (cur.x !== undefined && !isNaN(cur.x)) ? Number(cur.x) : def.x,
+      y: (cur.y !== undefined && !isNaN(cur.y)) ? Number(cur.y) : def.y,
+      w: (cur.w && !isNaN(cur.w)) ? Number(cur.w) : def.w,
+      h: (cur.h && !isNaN(cur.h)) ? Number(cur.h) : def.h,
+      scale: (cur.scale && !isNaN(cur.scale)) ? Number(cur.scale) : def.scale,
+      visible: (cur.visible !== undefined) ? Boolean(cur.visible) : def.visible
+    };
+  }
+
   drawFullscreenBanner(ctx, w, h, s, curDist, totalDist) {
-    const layout = this.hudLayout.banner;
+    const layout = this.getWidgetLayout('banner');
     const barW = layout.w * s;
     const barH = layout.h * s;
     const barX = layout.x;
@@ -911,7 +973,7 @@ class CanvasRenderer {
   // --- CORNER MINI-MAP ---
   drawCornerMiniMap(riderIdx, interp, curMercX, curMercY) {
     const ctx = this.ctx;
-    const layout = this.hudLayout.minimap;
+    const layout = this.getWidgetLayout('minimap');
     const s = this.hudScale * layout.scale;
 
     const boxX = layout.x;
@@ -1021,7 +1083,7 @@ class CanvasRenderer {
   // --- ELEVATION PROFILE GRAPH ---
   drawElevationProfile(progress, curDist, curEle, curGrade) {
     const ctx = this.ctx;
-    const layout = this.hudLayout.elevation;
+    const layout = this.getWidgetLayout('elevation');
     const s = this.hudScale * layout.scale;
 
     const graphX = layout.x;
@@ -1160,7 +1222,7 @@ class CanvasRenderer {
   // --- TELEMETRY STATS (TABULAR NUMBERS & ZERO OVERLAP) ---
   drawTelemetryStats(distKm, eleM, gradePct) {
     const ctx = this.ctx;
-    const layout = this.hudLayout.telemetry;
+    const layout = this.getWidgetLayout('telemetry');
     const s = this.hudScale * layout.scale;
 
     const cardX = layout.x;
@@ -1250,7 +1312,7 @@ class CanvasRenderer {
   // --- ANIMATED CLOCK WIDGET ---
   drawClockWidget(progress) {
     const ctx = this.ctx;
-    const layout = this.hudLayout.clock;
+    const layout = this.getWidgetLayout('clock');
     const s = this.hudScale * layout.scale;
 
     const clockX = layout.x;
@@ -1361,12 +1423,13 @@ class CanvasRenderer {
 
     const riderPix = this.gpxToMapPixels(curMercX, curMercY);
 
-    if (this.camX === 0 && this.camY === 0) {
+    if ((this.camX === 0 && this.camY === 0) || isNaN(this.camX) || isNaN(this.camY)) {
       this.camX = riderPix.x;
       this.camY = riderPix.y;
     } else {
-      this.camX += (riderPix.x - this.camX) * this.camDamping;
-      this.camY += (riderPix.y - this.camY) * this.camDamping;
+      const damp = (this.camDamping !== undefined && !isNaN(this.camDamping)) ? this.camDamping : 0.10;
+      this.camX += (riderPix.x - this.camX) * damp;
+      this.camY += (riderPix.y - this.camY) * damp;
     }
 
     let targetHeading = 0;
@@ -1490,8 +1553,8 @@ class CanvasRenderer {
   }
 
   drawGizmoHandles(ctx) {
-    if (!this.selectedElement || !this.hudLayout[this.selectedElement]) return;
-    const el = this.hudLayout[this.selectedElement];
+    if (!this.selectedElement) return;
+    const el = this.getWidgetLayout(this.selectedElement);
     const s = this.hudScale * el.scale;
 
     const x = el.x;
