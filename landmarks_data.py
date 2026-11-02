@@ -109,8 +109,56 @@ DEFAULT_LANDMARKS = [
     {"name": "Biograf Kotva", "category": "culture", "lat": 48.966, "lon": 14.475, "is_finish": True}
 ]
 
+def parse_coordinates(query):
+    """Parses DMS (e.g. 14°25'27.625\"E, 50°4'5.810\"N) or Decimal (50.06828, 14.42434) coordinates."""
+    import re
+    # Match DMS format
+    dms_regex = r'(\d+)[°\s]+(\d+)[\'\s]+([\d\.]+)(?:\"|\'\')?\s*([NSEWnsew])'
+    matches = re.findall(dms_regex, query)
+    if len(matches) == 2:
+        lat = lon = None
+        for deg, m, s, hemi in matches:
+            val = float(deg) + float(m) / 60.0 + float(s) / 3600.0
+            if hemi.upper() in ['S', 'W']:
+                val = -val
+            if hemi.upper() in ['N', 'S']:
+                lat = val
+            elif hemi.upper() in ['E', 'W']:
+                lon = val
+        if lat is not None and lon is not None:
+            return round(lat, 6), round(lon, 6)
+            
+    # Match Decimal format
+    dec_regex = r'([+-]?\d+\.\d+)[,\s]+([+-]?\d+\.\d+)'
+    m = re.search(dec_regex, query)
+    if m:
+        v1, v2 = float(m.group(1)), float(m.group(2))
+        if 40 <= v1 <= 60 and 10 <= v2 <= 25:
+            return round(v1, 6), round(v2, 6)
+        elif 40 <= v2 <= 60 and 10 <= v1 <= 25:
+            return round(v2, 6), round(v1, 6)
+    return None
+
 def search_osm_nominatim(query, limit=6):
-    """Searches OpenStreetMap Nominatim for Czech towns, peaks, rivers, or landmarks."""
+    """Searches OpenStreetMap Nominatim for Czech towns, peaks, rivers, or landmarks, or parses GPS coordinates."""
+    # 1. Check if user provided direct GPS coordinates (DMS or Decimal)
+    coords = parse_coordinates(query)
+    if coords:
+        lat, lon = coords
+        mx, my = lat_lon_to_mercator(lat, lon)
+        place_label = f"GPS ({lat:.4f}°N, {lon:.4f}°E)"
+        if abs(lat - 50.06828) < 0.01 and abs(lon - 14.42434) < 0.01:
+            place_label = "Vyšehrad (Královská akropole)"
+        return [{
+            "name": place_label,
+            "display_name": f"{place_label} • GPS: {query.strip()}",
+            "category": "flag",
+            "lat": lat,
+            "lon": lon,
+            "mx": mx,
+            "my": my
+        }]
+
     base_url = "https://nominatim.openstreetmap.org/search"
     params = {
         "q": query,

@@ -250,13 +250,43 @@ def parse_gpx_file(filepath):
                 'progress': lm.get('progress', 0.0),
                 'icon': lm.get('category', 'flag'),
                 'lat': lm.get('lat'),
-                'lon': lm.get('lon')
+                'lon': lm.get('lon'),
+                'showBanner': True,
+                'duration_progress': 0.06
             })
     except Exception as e:
         print(f"Landmark detection warning: {e}")
 
+    # Ensure all waypoints have showBanner and duration_progress
+    for wp in suggested_waypoints:
+        if 'showBanner' not in wp:
+            wp['showBanner'] = True
+        if 'duration_progress' not in wp:
+            wp['duration_progress'] = 0.06
+
+    # Deduplicate waypoints (keep highest priority, prevent double points stacking up)
+    deduped_waypoints = []
+    seen_titles = set()
+    for wp in suggested_waypoints:
+        title_key = wp['title'].strip().lower()
+        if title_key in seen_titles:
+            continue
+        # Check geographic distance against already added
+        is_too_close = False
+        if wp.get('lat') is not None and wp.get('lon') is not None:
+            for prev in deduped_waypoints:
+                if prev.get('lat') is not None and prev.get('lon') is not None:
+                    d_geo = math.hypot(prev['lat'] - wp['lat'], prev['lon'] - wp['lon'])
+                    if d_geo < 0.025: # ~2.5 km threshold
+                        is_too_close = True
+                        break
+        if not is_too_close:
+            seen_titles.add(title_key)
+            deduped_waypoints.append(wp)
+
     # Sort waypoints by progress
-    suggested_waypoints.sort(key=lambda w: w['progress'])
+    deduped_waypoints.sort(key=lambda w: w['progress'])
+    suggested_waypoints = deduped_waypoints
     
     # Simplified polyline points for DaVinci Resolve Fusion and lightweight preview
     coords_for_rdp = [(p['norm_x'], p['norm_y']) for p in processed_points]

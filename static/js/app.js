@@ -49,6 +49,10 @@ document.addEventListener('DOMContentLoaded', () => {
       trimOut: renderer.trimOut,
       trimMode: state.trimMode,
       durationSec: state.durationSec,
+      pulseSpeed: renderer.pulseSpeed || 1.0,
+      textContrastStyle: renderer.textContrastStyle || 'stroke_shadow',
+      minimapMode: renderer.minimapMode || 'overview',
+      minimapFollowZoom: renderer.minimapFollowZoom || 13.5,
       waypoints: JSON.parse(JSON.stringify(renderer.waypoints || [])),
       spotlight: JSON.parse(JSON.stringify(renderer.spotlight || {})),
       speedKeyframes: JSON.parse(JSON.stringify(speedKeyframes || [])),
@@ -75,6 +79,30 @@ document.addEventListener('DOMContentLoaded', () => {
       if (colorUnitsEl && renderer.colors.units) {
         colorUnitsEl.value = renderer.colors.units;
         if (colorUnitsValEl) colorUnitsValEl.textContent = renderer.colors.units.toUpperCase();
+      }
+      const cWpPin = document.getElementById('colorWaypointPin');
+      const cWpPinVal = document.getElementById('colorWaypointPinVal');
+      if (cWpPin && renderer.colors.waypointPin) {
+        cWpPin.value = renderer.colors.waypointPin;
+        if (cWpPinVal) cWpPinVal.textContent = renderer.colors.waypointPin.toUpperCase();
+      }
+      const cWpTxt = document.getElementById('colorWaypointText');
+      const cWpTxtVal = document.getElementById('colorWaypointTextVal');
+      if (cWpTxt && renderer.colors.waypointText) {
+        cWpTxt.value = renderer.colors.waypointText;
+        if (cWpTxtVal) cWpTxtVal.textContent = renderer.colors.waypointText.toUpperCase();
+      }
+      const cMw = document.getElementById('colorMotorways');
+      const cMwVal = document.getElementById('colorMotorwaysVal');
+      if (cMw && renderer.colors.motorways) {
+        cMw.value = renderer.colors.motorways;
+        if (cMwVal) cMwVal.textContent = renderer.colors.motorways.toUpperCase();
+      }
+      const cRd = document.getElementById('colorRoads');
+      const cRdVal = document.getElementById('colorRoadsVal');
+      if (cRd && renderer.colors.roads) {
+        cRd.value = renderer.colors.roads;
+        if (cRdVal) cRdVal.textContent = renderer.colors.roads.toUpperCase();
       }
     }
     if (s.hudScale) {
@@ -151,6 +179,34 @@ document.addEventListener('DOMContentLoaded', () => {
       const bFit = document.getElementById('btnTrimModeFit');
       if (bSlice) bSlice.classList.toggle('active', s.trimMode === 'slice');
       if (bFit) bFit.classList.toggle('active', s.trimMode === 'fit');
+    }
+    if (s.pulseSpeed !== undefined) {
+      renderer.pulseSpeed = s.pulseSpeed;
+      const pSlider = document.getElementById('pulseSpeedSlider');
+      const pVal = document.getElementById('pulseSpeedVal');
+      if (pSlider) pSlider.value = s.pulseSpeed;
+      if (pVal) pVal.textContent = `${s.pulseSpeed.toFixed(1)}x`;
+    }
+    if (s.textContrastStyle) {
+      renderer.textContrastStyle = s.textContrastStyle;
+      const tcSelect = document.getElementById('textContrastStyleSelect');
+      if (tcSelect) tcSelect.value = s.textContrastStyle;
+    }
+    if (s.minimapMode) {
+      renderer.minimapMode = s.minimapMode;
+      const bOver = document.getElementById('btnMinimapOverview');
+      const bFoll = document.getElementById('btnMinimapFollow');
+      const zBlock = document.getElementById('minimapZoomBlock');
+      if (bOver) bOver.classList.toggle('active', s.minimapMode === 'overview');
+      if (bFoll) bFoll.classList.toggle('active', s.minimapMode === 'follow');
+      if (zBlock) zBlock.style.display = s.minimapMode === 'follow' ? 'block' : 'none';
+    }
+    if (s.minimapFollowZoom !== undefined) {
+      renderer.minimapFollowZoom = s.minimapFollowZoom;
+      const zSlider = document.getElementById('minimapFollowZoomSlider');
+      const zVal = document.getElementById('minimapFollowZoomVal');
+      if (zSlider) zSlider.value = s.minimapFollowZoom;
+      if (zVal) zVal.textContent = `${s.minimapFollowZoom.toFixed(1)}x`;
     }
     if (s.durationSec) {
       state.durationSec = s.durationSec;
@@ -527,11 +583,72 @@ document.addEventListener('DOMContentLoaded', () => {
           colorUnitsEl.value = renderer.colors.units;
           if (colorUnitsValEl) colorUnitsValEl.textContent = renderer.colors.units.toUpperCase();
         }
+        const cWpPin = document.getElementById('colorWaypointPin');
+        const cWpPinVal = document.getElementById('colorWaypointPinVal');
+        if (cWpPin && renderer.colors.waypointPin) {
+          cWpPin.value = renderer.colors.waypointPin;
+          if (cWpPinVal) cWpPinVal.textContent = renderer.colors.waypointPin.toUpperCase();
+        }
+        const cWpTxt = document.getElementById('colorWaypointText');
+        const cWpTxtVal = document.getElementById('colorWaypointTextVal');
+        if (cWpTxt && renderer.colors.waypointText) {
+          cWpTxt.value = renderer.colors.waypointText;
+          if (cWpTxtVal) cWpTxtVal.textContent = renderer.colors.waypointText.toUpperCase();
+        }
+        const cMw = document.getElementById('colorMotorways');
+        const cMwVal = document.getElementById('colorMotorwaysVal');
+        if (cMw && renderer.colors.motorways) {
+          cMw.value = renderer.colors.motorways;
+          if (cMwVal) cMwVal.textContent = renderer.colors.motorways.toUpperCase();
+        }
+        const cRd = document.getElementById('colorRoads');
+        const cRdVal = document.getElementById('colorRoadsVal');
+        if (cRd && renderer.colors.roads) {
+          cRd.value = renderer.colors.roads;
+          if (cRdVal) cRdVal.textContent = renderer.colors.roads.toUpperCase();
+        }
+      }
+
+      if (s.pulseSpeed !== undefined) {
+        renderer.pulseSpeed = s.pulseSpeed;
+        const pSlider = document.getElementById('pulseSpeedSlider');
+        const pVal = document.getElementById('pulseSpeedVal');
+        if (pSlider) pSlider.value = s.pulseSpeed;
+        if (pVal) pVal.textContent = `${s.pulseSpeed.toFixed(1)}x`;
+      }
+      if (s.textContrastStyle) {
+        renderer.textContrastStyle = s.textContrastStyle;
+        const tcSelect = document.getElementById('textContrastStyleSelect');
+        if (tcSelect) tcSelect.value = s.textContrastStyle;
+      }
+      if (s.minimapMode) {
+        renderer.minimapMode = s.minimapMode;
+        const bOver = document.getElementById('btnMinimapOverview');
+        const bFoll = document.getElementById('btnMinimapFollow');
+        const zBlock = document.getElementById('minimapZoomBlock');
+        if (bOver) bOver.classList.toggle('active', s.minimapMode === 'overview');
+        if (bFoll) bFoll.classList.toggle('active', s.minimapMode === 'follow');
+        if (zBlock) zBlock.style.display = s.minimapMode === 'follow' ? 'block' : 'none';
+      }
+      if (s.minimapFollowZoom !== undefined) {
+        renderer.minimapFollowZoom = s.minimapFollowZoom;
+        const zSlider = document.getElementById('minimapFollowZoomSlider');
+        const zVal = document.getElementById('minimapFollowZoomVal');
+        if (zSlider) zSlider.value = s.minimapFollowZoom;
+        if (zVal) zVal.textContent = `${s.minimapFollowZoom.toFixed(1)}x`;
       }
 
       if (s.markerStyle) {
-        renderer.markerStyle = s.markerStyle;
-        markerStyleSelect.value = s.markerStyle;
+        const mStyle = s.markerStyle === 'pill' ? 'dot' : s.markerStyle;
+        renderer.markerStyle = mStyle;
+        markerStyleSelect.value = mStyle;
+      }
+      if (s.startFinishStyle) {
+        const sStyle = s.startFinishStyle === 'pill' ? 'dot' : s.startFinishStyle;
+        renderer.startFinishStyle = sStyle;
+        renderer.markerStyle = sStyle;
+        const sel = document.getElementById('startFinishStyleSelect');
+        if (sel) sel.value = sStyle;
       }
       if (s.startCityName) {
         renderer.startCityName = s.startCityName;
@@ -574,6 +691,26 @@ document.addEventListener('DOMContentLoaded', () => {
         if (lodToggleLocalRoads) lodToggleLocalRoads.checked = renderer.lod.local_roads;
         if (lodTogglePaths) lodTogglePaths.checked = renderer.lod.paths;
         if (lodToggleSettlements) lodToggleSettlements.checked = renderer.lod.settlements;
+        const lodRoadsRankSel = document.getElementById('lodRoadsFilterRankSelect');
+        const lodRoadsMeandersSlider = document.getElementById('lodRoadsMeandersSlider');
+        const lodRoadsMeandersVal = document.getElementById('lodRoadsMeandersVal');
+        const lodRoadsWidthSlider = document.getElementById('lodRoadsWidthSlider');
+        const lodRoadsWidthVal = document.getElementById('lodRoadsWidthVal');
+        const lodRoadsOpacitySlider = document.getElementById('lodRoadsOpacitySlider');
+        const lodRoadsOpacityVal = document.getElementById('lodRoadsOpacityVal');
+        if (lodRoadsRankSel && renderer.lod.roadsFilterRank !== undefined) lodRoadsRankSel.value = renderer.lod.roadsFilterRank;
+        if (lodRoadsMeandersSlider && renderer.lod.roadsMeanders !== undefined) {
+          lodRoadsMeandersSlider.value = renderer.lod.roadsMeanders;
+          if (lodRoadsMeandersVal) lodRoadsMeandersVal.textContent = `${renderer.lod.roadsMeanders} / 5`;
+        }
+        if (lodRoadsWidthSlider && renderer.lod.roadsWidth !== undefined) {
+          lodRoadsWidthSlider.value = renderer.lod.roadsWidth;
+          if (lodRoadsWidthVal) lodRoadsWidthVal.textContent = `${renderer.lod.roadsWidth.toFixed(1)}px`;
+        }
+        if (lodRoadsOpacitySlider && renderer.lod.roadsOpacity !== undefined) {
+          lodRoadsOpacitySlider.value = Math.round(renderer.lod.roadsOpacity * 100);
+          if (lodRoadsOpacityVal) lodRoadsOpacityVal.textContent = `${Math.round(renderer.lod.roadsOpacity * 100)}%`;
+        }
       }
       if (s.spotlight) {
         renderer.spotlight = { ...renderer.spotlight, ...s.spotlight };
@@ -3386,6 +3523,30 @@ document.addEventListener('DOMContentLoaded', () => {
         colorUnitsEl.value = renderer.colors.units;
         if (colorUnitsValEl) colorUnitsValEl.textContent = renderer.colors.units.toUpperCase();
       }
+      const cWpPin = document.getElementById('colorWaypointPin');
+      const cWpPinVal = document.getElementById('colorWaypointPinVal');
+      if (cWpPin && renderer.colors.waypointPin) {
+        cWpPin.value = renderer.colors.waypointPin;
+        if (cWpPinVal) cWpPinVal.textContent = renderer.colors.waypointPin.toUpperCase();
+      }
+      const cWpTxt = document.getElementById('colorWaypointText');
+      const cWpTxtVal = document.getElementById('colorWaypointTextVal');
+      if (cWpTxt && renderer.colors.waypointText) {
+        cWpTxt.value = renderer.colors.waypointText;
+        if (cWpTxtVal) cWpTxtVal.textContent = renderer.colors.waypointText.toUpperCase();
+      }
+      const cMw = document.getElementById('colorMotorways');
+      const cMwVal = document.getElementById('colorMotorwaysVal');
+      if (cMw && renderer.colors.motorways) {
+        cMw.value = renderer.colors.motorways;
+        if (cMwVal) cMwVal.textContent = renderer.colors.motorways.toUpperCase();
+      }
+      const cRd = document.getElementById('colorRoads');
+      const cRdVal = document.getElementById('colorRoadsVal');
+      if (cRd && renderer.colors.roads) {
+        cRd.value = renderer.colors.roads;
+        if (cRdVal) cRdVal.textContent = renderer.colors.roads.toUpperCase();
+      }
     }
     if (cfg.hudScale) {
       renderer.hudScale = cfg.hudScale;
@@ -3877,6 +4038,273 @@ document.addEventListener('DOMContentLoaded', () => {
     lodMeandersSlider.addEventListener('change', (e) => {
       saveStateForUndo('Členitost a meandry: ' + e.target.value);
       saveCurrentProjectSettings();
+    });
+  }
+
+  // ==================== 22. DRAGGABLE FLOATING LAYERS DRAWER ====================
+  const floatingDrawer = document.getElementById('floatingLayersDrawer');
+  const drawerHeader = document.getElementById('layersDrawerHeader') || document.querySelector('.layers-drawer-header');
+  if (floatingDrawer && drawerHeader) {
+    let isDraggingDrawer = false;
+    let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
+
+    drawerHeader.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('#btnCloseLayersDrawer') || e.target.closest('button') || e.target.closest('input')) return;
+      isDraggingDrawer = true;
+      drawerHeader.setPointerCapture(e.pointerId);
+      const rect = floatingDrawer.getBoundingClientRect();
+      const parentRect = floatingDrawer.parentElement.getBoundingClientRect();
+      floatingDrawer.style.right = 'auto';
+      floatingDrawer.style.left = `${rect.left - parentRect.left}px`;
+      floatingDrawer.style.top = `${rect.top - parentRect.top}px`;
+      startX = e.clientX;
+      startY = e.clientY;
+      initialLeft = rect.left - parentRect.left;
+      initialTop = rect.top - parentRect.top;
+    });
+
+    drawerHeader.addEventListener('pointermove', (e) => {
+      if (!isDraggingDrawer) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      const parentRect = floatingDrawer.parentElement.getBoundingClientRect();
+      const maxLeft = parentRect.width - floatingDrawer.offsetWidth - 8;
+      const maxTop = parentRect.height - 40;
+      floatingDrawer.style.left = `${Math.max(8, Math.min(maxLeft, initialLeft + dx))}px`;
+      floatingDrawer.style.top = `${Math.max(8, Math.min(maxTop, initialTop + dy))}px`;
+    });
+
+    const stopDrawerDrag = (e) => {
+      if (isDraggingDrawer) {
+        isDraggingDrawer = false;
+        try { drawerHeader.releasePointerCapture(e.pointerId); } catch (_) {}
+      }
+    };
+    drawerHeader.addEventListener('pointerup', stopDrawerDrag);
+    drawerHeader.addEventListener('pointercancel', stopDrawerDrag);
+  }
+
+  // ==================== 23. ROADS & HIGHWAYS LOD CONTROLS ====================
+  const lodRoadsRankSel = document.getElementById('lodRoadsFilterRankSelect');
+  const lodRoadsMeandersSlider = document.getElementById('lodRoadsMeandersSlider');
+  const lodRoadsMeandersVal = document.getElementById('lodRoadsMeandersVal');
+  const lodRoadsWidthSlider = document.getElementById('lodRoadsWidthSlider');
+  const lodRoadsWidthVal = document.getElementById('lodRoadsWidthVal');
+  const lodRoadsOpacitySlider = document.getElementById('lodRoadsOpacitySlider');
+  const lodRoadsOpacityVal = document.getElementById('lodRoadsOpacityVal');
+  const colorMotorways = document.getElementById('colorMotorways');
+  const colorMotorwaysVal = document.getElementById('colorMotorwaysVal');
+  const colorRoads = document.getElementById('colorRoads');
+  const colorRoadsVal = document.getElementById('colorRoadsVal');
+
+  if (lodRoadsRankSel) {
+    lodRoadsRankSel.addEventListener('change', (e) => {
+      if (!renderer.lod) renderer.lod = {};
+      renderer.lod.roadsFilterRank = parseInt(e.target.value);
+      saveStateForUndo('Kategorie silnic: ' + e.target.value);
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (lodRoadsMeandersSlider) {
+    lodRoadsMeandersSlider.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value);
+      if (lodRoadsMeandersVal) lodRoadsMeandersVal.textContent = `${val} / 5`;
+      if (!renderer.lod) renderer.lod = {};
+      renderer.lod.roadsMeanders = val;
+      if (!state.isPlaying) renderer.render();
+    });
+    lodRoadsMeandersSlider.addEventListener('change', (e) => {
+      saveStateForUndo('Členitost silnic: ' + e.target.value);
+      saveCurrentProjectSettings();
+    });
+    lodRoadsMeandersSlider.addEventListener('dblclick', () => {
+      lodRoadsMeandersSlider.value = 3;
+      if (lodRoadsMeandersVal) lodRoadsMeandersVal.textContent = '3 / 5';
+      if (!renderer.lod) renderer.lod = {};
+      renderer.lod.roadsMeanders = 3;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (lodRoadsWidthSlider) {
+    lodRoadsWidthSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      if (lodRoadsWidthVal) lodRoadsWidthVal.textContent = `${val.toFixed(1)}px`;
+      if (!renderer.lod) renderer.lod = {};
+      renderer.lod.roadsWidth = val;
+      if (!state.isPlaying) renderer.render();
+    });
+    lodRoadsWidthSlider.addEventListener('change', () => {
+      saveStateForUndo('Šířka silnic: ' + lodRoadsWidthSlider.value);
+      saveCurrentProjectSettings();
+    });
+    lodRoadsWidthSlider.addEventListener('dblclick', () => {
+      lodRoadsWidthSlider.value = 2.5;
+      if (lodRoadsWidthVal) lodRoadsWidthVal.textContent = '2.5px';
+      if (!renderer.lod) renderer.lod = {};
+      renderer.lod.roadsWidth = 2.5;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (lodRoadsOpacitySlider) {
+    lodRoadsOpacitySlider.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value);
+      if (lodRoadsOpacityVal) lodRoadsOpacityVal.textContent = `${val}%`;
+      if (!renderer.lod) renderer.lod = {};
+      renderer.lod.roadsOpacity = val / 100.0;
+      if (!state.isPlaying) renderer.render();
+    });
+    lodRoadsOpacitySlider.addEventListener('change', () => {
+      saveStateForUndo('Krytí silnic: ' + lodRoadsOpacitySlider.value);
+      saveCurrentProjectSettings();
+    });
+    lodRoadsOpacitySlider.addEventListener('dblclick', () => {
+      lodRoadsOpacitySlider.value = 70;
+      if (lodRoadsOpacityVal) lodRoadsOpacityVal.textContent = '70%';
+      if (!renderer.lod) renderer.lod = {};
+      renderer.lod.roadsOpacity = 0.70;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (colorMotorways) {
+    colorMotorways.addEventListener('input', (e) => {
+      renderer.colors.motorways = e.target.value;
+      if (colorMotorwaysVal) colorMotorwaysVal.textContent = e.target.value.toUpperCase();
+      if (!state.isPlaying) renderer.render();
+    });
+    colorMotorways.addEventListener('change', () => {
+      saveStateForUndo('Barva dálnic: ' + colorMotorways.value);
+      saveCurrentProjectSettings();
+    });
+  }
+
+  if (colorRoads) {
+    colorRoads.addEventListener('input', (e) => {
+      renderer.colors.roads = e.target.value;
+      if (colorRoadsVal) colorRoadsVal.textContent = e.target.value.toUpperCase();
+      if (!state.isPlaying) renderer.render();
+    });
+    colorRoads.addEventListener('change', () => {
+      saveStateForUndo('Barva silnic: ' + colorRoads.value);
+      saveCurrentProjectSettings();
+    });
+  }
+
+  // ==================== 24. TEXT CONTRAST & WAYPOINT MARKS ====================
+  const textContrastStyleSelect = document.getElementById('textContrastStyleSelect');
+  const colorWaypointPin = document.getElementById('colorWaypointPin');
+  const colorWaypointPinVal = document.getElementById('colorWaypointPinVal');
+  const colorWaypointText = document.getElementById('colorWaypointText');
+  const colorWaypointTextVal = document.getElementById('colorWaypointTextVal');
+
+  if (textContrastStyleSelect) {
+    textContrastStyleSelect.addEventListener('change', (e) => {
+      saveStateForUndo('Styl kontrastu textu: ' + e.target.value);
+      renderer.textContrastStyle = e.target.value;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (colorWaypointPin) {
+    colorWaypointPin.addEventListener('input', (e) => {
+      renderer.colors.waypointPin = e.target.value;
+      if (colorWaypointPinVal) colorWaypointPinVal.textContent = e.target.value.toUpperCase();
+      if (!state.isPlaying) renderer.render();
+    });
+    colorWaypointPin.addEventListener('change', () => {
+      saveStateForUndo('Barva značek milníků: ' + colorWaypointPin.value);
+      saveCurrentProjectSettings();
+    });
+  }
+
+  if (colorWaypointText) {
+    colorWaypointText.addEventListener('input', (e) => {
+      renderer.colors.waypointText = e.target.value;
+      if (colorWaypointTextVal) colorWaypointTextVal.textContent = e.target.value.toUpperCase();
+      if (!state.isPlaying) renderer.render();
+    });
+    colorWaypointText.addEventListener('change', () => {
+      saveStateForUndo('Barva textu milníků: ' + colorWaypointText.value);
+      saveCurrentProjectSettings();
+    });
+  }
+
+  // ==================== 25. MINIMAP OVERVIEW/FOLLOW & PULSE SPEED ====================
+  const btnMinimapOverview = document.getElementById('btnMinimapOverview');
+  const btnMinimapFollow = document.getElementById('btnMinimapFollow');
+  const minimapZoomBlock = document.getElementById('minimapZoomBlock');
+  const minimapFollowZoomSlider = document.getElementById('minimapFollowZoomSlider');
+  const minimapFollowZoomVal = document.getElementById('minimapFollowZoomVal');
+  const pulseSpeedSlider = document.getElementById('pulseSpeedSlider');
+  const pulseSpeedVal = document.getElementById('pulseSpeedVal');
+
+  if (btnMinimapOverview && btnMinimapFollow) {
+    btnMinimapOverview.addEventListener('click', () => {
+      btnMinimapOverview.classList.add('active');
+      btnMinimapFollow.classList.remove('active');
+      renderer.minimapMode = 'overview';
+      if (minimapZoomBlock) minimapZoomBlock.style.display = 'none';
+      saveStateForUndo('Minimapa: Celá trasa');
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+
+    btnMinimapFollow.addEventListener('click', () => {
+      btnMinimapFollow.classList.add('active');
+      btnMinimapOverview.classList.remove('active');
+      renderer.minimapMode = 'follow';
+      if (minimapZoomBlock) minimapZoomBlock.style.display = 'block';
+      saveStateForUndo('Minimapa: Sledování jezdce');
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (minimapFollowZoomSlider) {
+    minimapFollowZoomSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      if (minimapFollowZoomVal) minimapFollowZoomVal.textContent = `${val.toFixed(1)}x`;
+      renderer.minimapFollowZoom = val;
+      if (!state.isPlaying) renderer.render();
+    });
+    minimapFollowZoomSlider.addEventListener('change', () => {
+      saveStateForUndo('Minimapa zoom: ' + minimapFollowZoomSlider.value);
+      saveCurrentProjectSettings();
+    });
+    minimapFollowZoomSlider.addEventListener('dblclick', () => {
+      minimapFollowZoomSlider.value = 13.5;
+      if (minimapFollowZoomVal) minimapFollowZoomVal.textContent = '13.5x';
+      renderer.minimapFollowZoom = 13.5;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (pulseSpeedSlider) {
+    pulseSpeedSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      if (pulseSpeedVal) pulseSpeedVal.textContent = `${val.toFixed(1)}x`;
+      renderer.pulseSpeed = val;
+      if (!state.isPlaying) renderer.render();
+    });
+    pulseSpeedSlider.addEventListener('change', () => {
+      saveStateForUndo('Rychlost pulzu: ' + pulseSpeedSlider.value);
+      saveCurrentProjectSettings();
+    });
+    pulseSpeedSlider.addEventListener('dblclick', () => {
+      pulseSpeedSlider.value = 1.0;
+      if (pulseSpeedVal) pulseSpeedVal.textContent = '1.0x';
+      renderer.pulseSpeed = 1.0;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
 

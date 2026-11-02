@@ -152,71 +152,85 @@ LAKES_DAMS_DATA = [
     }
 ]
 
-# Major Highways & Motorways along the corridor (Dual-cased style)
+# Major Highways & Motorways along the corridor (Dual-cased style, dense real-world geometry)
 HIGHWAYS_DATA = [
     {
         "ref": "D3",
         "name": "Dálnice D3 (Praha - České Budějovice)",
         "coords": [
-            [49.950, 14.480], [49.850, 14.520], [49.720, 14.610],
-            [49.620, 14.640], [49.520, 14.660], [49.414, 14.670],
-            [49.330, 14.690], [49.240, 14.700], [49.120, 14.600],
-            [49.020, 14.530], [48.974, 14.520]
+            [49.980, 14.470], [49.950, 14.482], [49.910, 14.505], [49.850, 14.520],
+            [49.790, 14.565], [49.720, 14.610], [49.670, 14.628], [49.620, 14.640],
+            [49.560, 14.652], [49.520, 14.660], [49.460, 14.665], [49.414, 14.670], # Tábor
+            [49.380, 14.680], [49.330, 14.690], [49.290, 14.695], [49.240, 14.700], # Soběslav
+            [49.190, 14.665], [49.120, 14.600], [49.070, 14.560], [49.020, 14.530],
+            [48.995, 14.525], [48.974, 14.520]                                       # České Budějovice
         ]
     },
     {
         "ref": "D1",
         "name": "Dálnice D1 (Praha - Mirošovice)",
         "coords": [
-            [50.040, 14.490], [49.990, 14.580], [49.920, 14.710], [49.880, 14.780]
+            [50.040, 14.490], [50.015, 14.535], [49.990, 14.580], [49.955, 14.645],
+            [49.920, 14.710], [49.900, 14.745], [49.880, 14.780]
         ]
     },
     {
         "ref": "D4",
         "name": "Dálnice D4 (Praha - Příbram - Písek)",
         "coords": [
-            [49.980, 14.390], [49.920, 14.320], [49.820, 14.220],
-            [49.710, 14.100], [49.580, 14.050], [49.450, 14.050]
+            [49.980, 14.390], [49.950, 14.355], [49.920, 14.320], [49.870, 14.270],
+            [49.820, 14.220], [49.765, 14.160], [49.710, 14.100], [49.645, 14.075],
+            [49.580, 14.050], [49.515, 14.050], [49.450, 14.050]
         ]
     },
     {
         "ref": "D0",
         "name": "Pražský okruh D0",
         "coords": [
-            [50.005, 14.350], [49.990, 14.405], [50.000, 14.480], [50.020, 14.550]
+            [50.005, 14.350], [49.998, 14.380], [49.990, 14.405], [49.995, 14.442],
+            [50.000, 14.480], [50.010, 14.515], [50.020, 14.550]
         ]
     }
 ]
 
-# Primary Roads (I/3, I/4, I/20, I/34)
+# Primary Roads (I/3, I/4, I/20, I/19)
 PRIMARY_ROADS_DATA = [
     {
         "ref": "I/3",
         "coords": [
-            [49.900, 14.630], [49.780, 14.680], [49.650, 14.640],
-            [49.420, 14.650], [49.260, 14.710], [48.980, 14.480]
+            [49.900, 14.630], [49.840, 14.655], [49.780, 14.680], [49.715, 14.660],
+            [49.650, 14.640], [49.535, 14.645], [49.420, 14.650], [49.340, 14.680],
+            [49.260, 14.710], [49.120, 14.590], [48.980, 14.480]
         ]
     },
     {
         "ref": "I/20",
         "coords": [
-            [49.310, 14.150], [49.200, 14.250], [49.050, 14.380], [48.980, 14.460]
+            [49.310, 14.150], [49.255, 14.200], [49.200, 14.250], [49.125, 14.315],
+            [49.050, 14.380], [49.015, 14.420], [48.980, 14.460]
         ]
     },
     {
         "ref": "I/19",
         "coords": [
-            [49.414, 14.500], [49.414, 14.660], [49.430, 14.850]
+            [49.414, 14.350], [49.414, 14.500], [49.414, 14.660], [49.422, 14.755],
+            [49.430, 14.850]
+        ]
+    },
+    {
+        "ref": "I/4",
+        "coords": [
+            [49.450, 14.050], [49.380, 14.020], [49.300, 13.980], [49.250, 13.900]
         ]
     }
 ]
 
 # Secondary / Local Roads connecting towns
 LOCAL_ROADS_DATA = [
-    {"ref": "II/102", "coords": [[49.980, 14.400], [49.880, 14.400], [49.750, 14.360]]},
-    {"ref": "II/105", "coords": [[49.890, 14.490], [49.750, 14.530], [49.650, 14.530]]},
-    {"ref": "II/121", "coords": [[49.640, 14.640], [49.550, 14.450], [49.450, 14.250]]},
-    {"ref": "II/159", "coords": [[49.260, 14.450], [49.220, 14.420], [49.180, 14.400]]}
+    {"ref": "II/102", "coords": [[49.980, 14.400], [49.930, 14.400], [49.880, 14.400], [49.815, 14.380], [49.750, 14.360]]},
+    {"ref": "II/105", "coords": [[49.890, 14.490], [49.820, 14.510], [49.750, 14.530], [49.700, 14.530], [49.650, 14.530]]},
+    {"ref": "II/121", "coords": [[49.640, 14.640], [49.595, 14.545], [49.550, 14.450], [49.500, 14.350], [49.450, 14.250]]},
+    {"ref": "II/159", "coords": [[49.260, 14.450], [49.240, 14.435], [49.220, 14.420], [49.200, 14.410], [49.180, 14.400]]}
 ]
 
 # Pedestrian & Cycling Greenways
@@ -327,20 +341,20 @@ def auto_detect_landmarks(gpx_points):
     detected.sort(key=lambda x: x.get("progress", 0))
     return detected
 
-def deduplicate_points(places, landmarks, threshold_km=5.0):
+def deduplicate_points(places, landmarks, threshold_km=6.0):
     """
     Prevents duplicate points/labels within threshold_km.
-    If a landmark is within threshold_km of a settlement, landmark takes precedence or suppresses place.
+    1. If a landmark is within threshold_km of a settlement, landmark takes precedence.
+    2. If two settlements are close to each other, higher-ranked settlement takes precedence.
     """
+    sorted_places = sorted(places, key=lambda p: (p.get("rank", 99), p.get("name", "")))
     filtered_places = []
-    for pl in places:
-        is_dup = False
-        for lm in landmarks:
-            dist = math.hypot((pl["lat"] - lm["lat"]) * 111.0, (pl["lon"] - lm["lon"]) * 71.0)
-            if dist < threshold_km:
-                is_dup = True
-                break
-        if not is_dup:
+    for pl in sorted_places:
+        near_lm = any(math.hypot((pl["lat"] - lm["lat"]) * 111.0, (pl["lon"] - lm["lon"]) * 71.0) < threshold_km for lm in landmarks)
+        if near_lm:
+            continue
+        near_other = any(math.hypot((pl["lat"] - other["lat"]) * 111.0, (pl["lon"] - other["lon"]) * 71.0) < threshold_km for other in filtered_places)
+        if not near_other:
             filtered_places.append(pl)
     return filtered_places
 

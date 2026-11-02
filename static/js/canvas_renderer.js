@@ -73,15 +73,19 @@ class CanvasRenderer {
     // Independent Color Styling (DaVinci Slate & Neon Accents)
     this.colors = {
       path: '#00f0ff',           // Primary active route (Electric Cyan)
-      trail: 'rgba(255,255,255,0.22)', // Unreached route line
-      elevation: '#ffb703',      // Elevation plot line & gradient fill (Amber Gold)
-      elevationFillAlpha: 0.45,
+      trail: 'rgba(255,255,255,0.75)', // Unreached route line (Opaque over rivers)
+      elevation: '#94a3b8',      // Elevation plot line & gradient fill (Slate Gray)
+      elevationFillAlpha: 0.35,
       text: '#f0f6fc',           // Main typography & telemetry values
       textDim: 'rgba(240,246,252,0.6)',
       units: '#38bdf8',          // Dedicated HUD unit color (km, m, %, h)
       cardBg: 'rgba(15, 18, 24, 0.88)',
       cardBorder: 'rgba(255, 255, 255, 0.12)',
       river: '#00a8ff',          // Vltava and major rivers (Vibrant Blue)
+      motorways: '#e2e8f0',      // Motorways / Highways color
+      roads: '#94a3b8',          // Primary and secondary roads
+      waypointPin: '#f59e0b',    // Route waypoint pins color (Amber Gold default)
+      waypointText: '#f0f6fc',   // Route waypoint label text
       startMarker: '#10b981',    // Start badge color (Emerald Green)
       finishMarker: '#00f0ff',   // Finish badge color (Cyan)
       glowIntensity: 2           // 0: Off, 1: Low, 2: Med, 3: Neon Ultra
@@ -108,6 +112,10 @@ class CanvasRenderer {
       motorways: true,
       primary_roads: true,
       local_roads: false,
+      roadsFilterRank: 2,        // 1: Dálnice, 2: Dálnice + I. třída, 3: Všechny včetně II. třídy
+      roadsMeanders: 3,          // 1: Přímkové segmenty, 3: Reálné trasování, 5: Hladké organické křivky
+      roadsWidth: 2.5,
+      roadsOpacity: 0.70,
       paths: false,
       settlements: true,
       citiesVisible: true,
@@ -132,6 +140,16 @@ class CanvasRenderer {
 
     // Real-World Time Milestones (km -> HH:MM:SS)
     this.timeMilestones = [];
+
+    // Text contrast & readability styling over video ('stroke_shadow' | 'clean' | 'pill')
+    this.textContrastStyle = 'stroke_shadow';
+
+    // Minimap mode ('overview' | 'follow') and follow zoom
+    this.minimapMode = 'overview';
+    this.minimapFollowZoom = 13.5;
+
+    // Travelling Rider Pulse Speed
+    this.pulseSpeed = 1.0;
 
     // Kilometer-based Trimming
     this.trimInKm = 0.0;
@@ -244,9 +262,22 @@ class CanvasRenderer {
     this.canvas.height = height;
   }
 
-  setGPXData(data) {
+  setGPXData(data, preserveWaypoints = false) {
     this.gpxData = data;
-    this.waypoints = data.suggested_waypoints ? [...data.suggested_waypoints] : [];
+    if (!preserveWaypoints || !this.waypoints || this.waypoints.length === 0) {
+      const uniqueWps = [];
+      const seenTitles = new Set();
+      if (data.suggested_waypoints) {
+        for (const wp of data.suggested_waypoints) {
+          const key = (wp.title || '').trim().toLowerCase();
+          if (key && !seenTitles.has(key)) {
+            seenTitles.add(key);
+            uniqueWps.push({ ...wp, showBanner: wp.showBanner !== false });
+          }
+        }
+      }
+      this.waypoints = uniqueWps;
+    }
     this.camX = 0;
     this.camY = 0;
     this.camHeading = 0;
@@ -547,7 +578,7 @@ class CanvasRenderer {
 
   // MAIN 60FPS RENDER LOOP
   render(deltaTime = 0.016) {
-    this.pulsePhase += deltaTime * 3.5;
+    this.pulsePhase += deltaTime * 3.5 * (this.pulseSpeed || 1.0);
     this.collisionResolver.reset();
 
     const ctx = this.ctx;
@@ -690,9 +721,8 @@ class CanvasRenderer {
   }
 
   drawCityLabel(ctx, x, y, name, rank, s, category = 'town') {
-    if (x < -150 || x > this.width + 150 || y < -100 || y > this.height + 100) return;
+    if (x < -150 || x > this.width + 150 || y < -100 || y > this.height + 100) return false;
 
-    ctx.save();
     let fontSize = 11;
     let dotRadius = 2.5;
     let labelColor = (this.lod && this.lod.colorTowns) || '#cbd5e1';
@@ -719,27 +749,68 @@ class CanvasRenderer {
       labelColor = (this.lod && this.lod.colorLandmarks) || '#38bdf8';
     }
 
+    // Screen-space label collision resolution: dynamically suppresses overlapping names (e.g. Sedlec-Prčice & Miličín)
+    const approxCharWidth = fontSize * s * 0.62;
+    const boxW = name.length * approxCharWidth + 12 * s;
+    const boxH = fontSize * s * 1.5;
+    const boxX = x + 6 * s;
+    const boxY = y - boxH / 2;
+
+    if (!this.collisionResolver.place(boxX, boxY, boxW, boxH, 4 * s)) {
+      return false; // Suppressed due to collision with higher priority or already placed label
+    }
+
+    ctx.save();
+
     // Dot marker with halo
     ctx.fillStyle = labelColor;
     ctx.beginPath();
     ctx.arc(x, y, dotRadius * s, 0, Math.PI * 2);
     ctx.fill();
 
-    // Text Label with dark contrast drop-shadow
+    // Text Label with contrast styling
     ctx.font = `${fontWeight} ${fontSize * s}px Inter, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
 
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-    ctx.shadowBlur = 4 * s;
-    ctx.lineWidth = 2.5 * s;
-    ctx.strokeStyle = 'rgba(15, 17, 21, 0.85)';
-    ctx.strokeText(name, x + 6 * s, y);
+    const textStyle = this.textContrastStyle || 'stroke_shadow';
+    const tx = x + 6 * s;
+    const ty = y;
 
-    ctx.shadowColor = 'transparent';
-    ctx.fillText(name, x + 6 * s, y);
+    if (textStyle === 'pill') {
+      const tw = ctx.measureText(name).width;
+      const th = fontSize * s;
+      const padX = 5 * s;
+      const padY = 2.5 * s;
+      ctx.fillStyle = 'rgba(15, 18, 24, 0.85)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1 * s;
+      this.roundRect(ctx, tx - padX, ty - th / 2 - padY, tw + padX * 2, th + padY * 2, 4 * s);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = labelColor;
+      ctx.fillText(name, tx, ty);
+    } else if (textStyle === 'clean') {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+      ctx.shadowBlur = 6 * s;
+      ctx.fillStyle = labelColor;
+      ctx.fillText(name, tx, ty);
+    } else {
+      // 'stroke_shadow' - Heavy TV outline for crystal-clear readability over bright or busy video backgrounds
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+      ctx.shadowBlur = 4 * s;
+      ctx.lineWidth = 2.8 * s;
+      ctx.strokeStyle = 'rgba(10, 14, 20, 0.95)';
+      ctx.strokeText(name, tx, ty);
+
+      ctx.shadowColor = 'transparent';
+      ctx.fillStyle = labelColor;
+      ctx.fillText(name, tx, ty);
+    }
 
     ctx.restore();
+    return true;
   }
 
   // --- VECTOR LOD LAYERS ---
@@ -749,8 +820,22 @@ class CanvasRenderer {
     const s = this.hudScale;
     const density = (this.lod && this.lod.density !== undefined) ? this.lod.density : 3;
     const meandersLOD = (this.lod && this.lod.meanders !== undefined) ? this.lod.meanders : 4;
+    const roadsRank = (this.lod && this.lod.roadsFilterRank !== undefined) ? this.lod.roadsFilterRank : 2;
+    const roadsMeanders = (this.lod && this.lod.roadsMeanders !== undefined) ? this.lod.roadsMeanders : 3;
+    const roadsWidth = (this.lod && this.lod.roadsWidth !== undefined) ? this.lod.roadsWidth : 2.5;
+    const roadsOpacity = (this.lod && this.lod.roadsOpacity !== undefined) ? this.lod.roadsOpacity : 0.70;
 
-    // 1. Water Bodies: Lakes & Dams
+    const filterPtsByMeanders = (pts, meanderLevel) => {
+      if (!pts || pts.length <= 2) return pts;
+      if (meanderLevel === 1) {
+        return pts.filter((_, idx) => idx === 0 || idx === pts.length - 1 || idx % 4 === 0);
+      } else if (meanderLevel === 2) {
+        return pts.filter((_, idx) => idx === 0 || idx === pts.length - 1 || idx % 2 === 0);
+      }
+      return pts;
+    };
+
+    // 1. Water Bodies: Lakes & Dams (Background)
     if (this.lod && this.lod.lakes_dams !== false && layers.lakes_dams) {
       const lakesOpacity = (this.lod && this.lod.lakesOpacity !== undefined) ? this.lod.lakesOpacity : 0.35;
       ctx.fillStyle = this.hexToRgba(this.colors.river || '#38bdf8', lakesOpacity);
@@ -771,7 +856,7 @@ class CanvasRenderer {
       }
     }
 
-    // 2. Rivers (Soft background, single draw, configurable opacity, width, rank & meander geometry)
+    // 2. Rivers (Soft background, configurable opacity, width, rank & meanders)
     if (this.lod && this.lod.rivers !== false && layers.rivers) {
       const rOpacity = (this.lod && this.lod.riverOpacity !== undefined) ? this.lod.riverOpacity : 0.35;
       const rWidth = (this.lod && this.lod.riverWidth !== undefined) ? this.lod.riverWidth : 2.5;
@@ -786,14 +871,7 @@ class CanvasRenderer {
         if (r.rank && r.rank > filterRank) continue;
         if (!r.points || r.points.length < 2) continue;
 
-        // Subsample river points if meander geometry LOD is set low (1 = straight line segments)
-        let pts = r.points;
-        if (meandersLOD === 1) {
-          pts = pts.filter((_, idx) => idx === 0 || idx === pts.length - 1 || idx % 4 === 0);
-        } else if (meandersLOD === 2) {
-          pts = pts.filter((_, idx) => idx === 0 || idx === pts.length - 1 || idx % 2 === 0);
-        }
-
+        let pts = filterPtsByMeanders(r.points, meandersLOD);
         ctx.beginPath();
         for (let i = 0; i < pts.length; i++) {
           const pt = toScreen(pts[i].mx, pts[i].my);
@@ -804,7 +882,7 @@ class CanvasRenderer {
       }
     }
 
-    // 3. Urban Areas (Only if explicitly enabled and non-empty)
+    // 3. Urban Areas
     if (this.lod && this.lod.urbanAreas && layers.urban_areas && layers.urban_areas.length > 0) {
       ctx.fillStyle = 'rgba(28, 35, 48, 0.45)';
       ctx.strokeStyle = 'rgba(55, 68, 90, 0.55)';
@@ -824,37 +902,50 @@ class CanvasRenderer {
       }
     }
 
-    // 4. Motorways (Dual Casing)
-    if (this.lod && this.lod.motorways !== false && layers.motorways) {
+    // 4. Motorways / Dálnice (Governed by roadsFilterRank >= 1 & roadsMeanders & roadsWidth)
+    if (this.lod && this.lod.motorways !== false && roadsRank >= 1 && layers.motorways) {
+      const mwColor = this.colors.motorways || '#e2e8f0';
+      const mwWidth = Math.max(1.5, roadsWidth * 1.35 * s);
       for (const m of layers.motorways) {
         if (m.id && !this.isFeatureVisible(m.id)) continue;
         if (!m.points || m.points.length < 2) continue;
+        const pts = filterPtsByMeanders(m.points, roadsMeanders);
+
+        // Dark casing
         ctx.beginPath();
-        for (let i = 0; i < m.points.length; i++) {
-          const pt = toScreen(m.points[i].mx, m.points[i].my);
+        for (let i = 0; i < pts.length; i++) {
+          const pt = toScreen(pts[i].mx, pts[i].my);
           if (i === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         }
-        ctx.strokeStyle = 'rgba(10, 14, 20, 0.9)';
-        ctx.lineWidth = 6 * s;
+        ctx.strokeStyle = 'rgba(10, 14, 20, 0.85)';
+        ctx.lineWidth = mwWidth + 2.5 * s;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.stroke();
 
-        ctx.strokeStyle = '#e2e8f0';
-        ctx.lineWidth = 2.8 * s;
+        // Core motorway line
+        ctx.strokeStyle = this.hexToRgba(mwColor, roadsOpacity);
+        ctx.lineWidth = mwWidth;
         ctx.stroke();
       }
     }
 
-    // 5. Primary Roads
-    if (this.lod && this.lod.primary_roads !== false && layers.primary_roads) {
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.65)';
-      ctx.lineWidth = 2.5 * s;
+    // 5. Primary Roads / Silnice I. třídy (Governed by roadsFilterRank >= 2)
+    if (this.lod && this.lod.primary_roads !== false && roadsRank >= 2 && layers.primary_roads) {
+      const rdColor = this.colors.roads || '#94a3b8';
+      const rdWidth = Math.max(1.2, roadsWidth * s);
+      ctx.strokeStyle = this.hexToRgba(rdColor, roadsOpacity * 0.85);
+      ctx.lineWidth = rdWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       for (const pr of layers.primary_roads) {
         if (pr.id && !this.isFeatureVisible(pr.id)) continue;
         if (!pr.points || pr.points.length < 2) continue;
+        const pts = filterPtsByMeanders(pr.points, roadsMeanders);
         ctx.beginPath();
-        for (let i = 0; i < pr.points.length; i++) {
-          const pt = toScreen(pr.points[i].mx, pr.points[i].my);
+        for (let i = 0; i < pts.length; i++) {
+          const pt = toScreen(pts[i].mx, pts[i].my);
           if (i === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         }
@@ -862,16 +953,21 @@ class CanvasRenderer {
       }
     }
 
-    // 6. Local Roads
-    if (this.lod && this.lod.local_roads && layers.local_roads) {
-      ctx.strokeStyle = 'rgba(100, 116, 139, 0.45)';
-      ctx.lineWidth = 1.5 * s;
+    // 6. Local & Secondary Roads / Silnice II. třídy (Governed by roadsFilterRank >= 3)
+    if (this.lod && this.lod.local_roads !== false && roadsRank >= 3 && layers.local_roads) {
+      const locColor = this.colors.roads || '#94a3b8';
+      const locWidth = Math.max(0.8, roadsWidth * 0.70 * s);
+      ctx.strokeStyle = this.hexToRgba(locColor, roadsOpacity * 0.60);
+      ctx.lineWidth = locWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       for (const lr of layers.local_roads) {
         if (lr.id && !this.isFeatureVisible(lr.id)) continue;
         if (!lr.points || lr.points.length < 2) continue;
+        const pts = filterPtsByMeanders(lr.points, roadsMeanders);
         ctx.beginPath();
-        for (let i = 0; i < lr.points.length; i++) {
-          const pt = toScreen(lr.points[i].mx, lr.points[i].my);
+        for (let i = 0; i < pts.length; i++) {
+          const pt = toScreen(pts[i].mx, pts[i].my);
           if (i === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         }
@@ -898,9 +994,10 @@ class CanvasRenderer {
       ctx.setLineDash([]);
     }
 
-    // 8. Settlements & Towns (Governed by LOD density slider & category toggles)
+    // 8. Settlements & Towns (Sorted by rank so cities get placed first, then towns, then villages)
     if (this.lod && this.lod.settlements !== false && layers.places) {
-      for (const pl of layers.places) {
+      const sortedPlaces = [...layers.places].sort((a, b) => (a.rank || 3) - (b.rank || 3));
+      for (const pl of sortedPlaces) {
         if (pl.id && !this.isFeatureVisible(pl.id)) continue;
         if (pl.rank > density) continue;
         if (pl.rank === 1 && this.lod.citiesVisible === false) continue;
@@ -1143,7 +1240,11 @@ class CanvasRenderer {
 
   drawWaypointRoutePin(ctx, x, y, wp, s) {
     ctx.save();
-    ctx.fillStyle = '#f59e0b'; // Amber milestone pin
+    const pinColor = (this.colors && this.colors.waypointPin) || '#f59e0b';
+    const textColor = (this.colors && this.colors.waypointText) || '#f0f6fc';
+    const textStyle = this.textContrastStyle || 'stroke_shadow';
+
+    ctx.fillStyle = pinColor;
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.8 * s;
     ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
@@ -1154,14 +1255,43 @@ class CanvasRenderer {
     ctx.fill();
     ctx.stroke();
 
-    // Subtle label above pin
-    ctx.font = `700 ${9 * s}px Inter, sans-serif`;
+    // Subtle label above pin with selected textContrastStyle
+    const title = wp.title || 'Bod';
+    ctx.font = `700 ${9.5 * s}px Inter, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillStyle = '#f0f6fc';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-    ctx.shadowBlur = 4 * s;
-    ctx.fillText(wp.title || 'Bod', x, y - 7 * s);
+    const labelY = y - 7 * s;
+
+    if (textStyle === 'pill') {
+      const tw = ctx.measureText(title).width;
+      const th = 10 * s;
+      const padX = 5 * s;
+      const padY = 2.5 * s;
+      ctx.fillStyle = 'rgba(15, 18, 24, 0.85)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1 * s;
+      this.roundRect(ctx, x - tw / 2 - padX, labelY - th - padY, tw + padX * 2, th + padY * 2, 4 * s);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = textColor;
+      ctx.fillText(title, x, labelY);
+    } else if (textStyle === 'clean') {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+      ctx.shadowBlur = 5 * s;
+      ctx.fillStyle = textColor;
+      ctx.fillText(title, x, labelY);
+    } else {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+      ctx.shadowBlur = 4 * s;
+      ctx.lineWidth = 2.6 * s;
+      ctx.strokeStyle = 'rgba(10, 14, 20, 0.95)';
+      ctx.strokeText(title, x, labelY);
+
+      ctx.shadowColor = 'transparent';
+      ctx.fillStyle = textColor;
+      ctx.fillText(title, x, labelY);
+    }
 
     ctx.restore();
   }
@@ -1969,14 +2099,27 @@ class CanvasRenderer {
     const mapDrawW = boxW - mapInnerPad * 2;
     const mapDrawH = boxH - 36 * s - mapInnerPad * 2;
 
-    const scale = Math.min(mapDrawW / spanX, mapDrawH / spanY);
-    const offsetX = boxX + mapInnerPad + (mapDrawW - spanX * scale) / 2;
-    const offsetY = boxY + 32 * s + mapInnerPad + (mapDrawH - spanY * scale) / 2;
-
-    const toMiniMap = (mx, my) => ({
-      x: offsetX + (mx - b.min_mx) * scale,
-      y: offsetY + (my - b.min_my) * scale
-    });
+    const isFollow = this.minimapMode === 'follow';
+    let toMiniMap;
+    if (isFollow) {
+      const followZoom = Math.max(10.0, Math.min(18.0, this.minimapFollowZoom || 13.5));
+      const nFollow = Math.pow(2, followZoom);
+      const centerX = boxX + boxW / 2;
+      const centerY = boxY + 30 * s + (boxH - 34 * s) / 2;
+      const scaleFollow = (boxW / 1920) * 256 * nFollow;
+      toMiniMap = (mx, my) => ({
+        x: centerX + (mx - curMercX) * scaleFollow,
+        y: centerY + (my - curMercY) * scaleFollow
+      });
+    } else {
+      const scale = Math.min(mapDrawW / spanX, mapDrawH / spanY);
+      const offsetX = boxX + mapInnerPad + (mapDrawW - spanX * scale) / 2;
+      const offsetY = boxY + 32 * s + mapInnerPad + (mapDrawH - spanY * scale) / 2;
+      toMiniMap = (mx, my) => ({
+        x: offsetX + (mx - b.min_mx) * scale,
+        y: offsetY + (my - b.min_my) * scale
+      });
+    }
 
     // 1. Water Bodies: Lakes & Dams on Minimap (Soft Background)
     if (this.lod && this.lod.lakes_dams !== false && this.vectorLayers && this.vectorLayers.lakes_dams) {
@@ -2014,6 +2157,24 @@ class CanvasRenderer {
         ctx.beginPath();
         for (let i = 0; i < river.points.length; i++) {
           const pt = toMiniMap(river.points[i].mx, river.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 2B. Motorways and Roads on Minimap (Subtle background navigation lines)
+    if (this.vectorLayers && this.lod && this.lod.motorways !== false && this.vectorLayers.motorways) {
+      const mwOpacity = ((this.lod && this.lod.roadsOpacity !== undefined) ? this.lod.roadsOpacity : 0.70) * 0.50;
+      ctx.strokeStyle = this.hexToRgba(this.colors.motorways || '#e2e8f0', mwOpacity);
+      ctx.lineWidth = Math.max(1.0, 1.8 * s);
+      for (const m of this.vectorLayers.motorways) {
+        if (m.id && !this.isFeatureVisible(m.id)) continue;
+        if (!m.points || m.points.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < m.points.length; i++) {
+          const pt = toMiniMap(m.points[i].mx, m.points[i].my);
           if (i === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         }
