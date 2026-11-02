@@ -38,25 +38,42 @@ document.addEventListener('DOMContentLoaded', () => {
       colors: JSON.parse(JSON.stringify(renderer.colors)),
       hudScale: renderer.hudScale,
       lineWidth: renderer.lineWidth,
+      dotSize: renderer.dotSize,
       hudLayout: JSON.parse(JSON.stringify(renderer.hudLayout)),
       toggles: JSON.parse(JSON.stringify(renderer.toggles)),
       lod: JSON.parse(JSON.stringify(renderer.lod || {})),
       mapStyle: renderer.mapStyle,
       animationMode: renderer.animationMode,
       startFinishStyle: renderer.startFinishStyle || renderer.markerStyle || 'dot',
+      startCityName: renderer.startCityName || 'Start',
+      finishCityName: renderer.finishCityName || 'Cíl',
       disabledFeatures: Array.from(renderer.disabledFeatures || []),
       trimIn: renderer.trimIn,
       trimOut: renderer.trimOut,
+      trimInKm: renderer.trimInKm,
+      trimOutKm: renderer.trimOutKm,
       trimMode: state.trimMode,
       durationSec: state.durationSec,
+      fps: state.fps,
+      playbackSpeed: state.playbackSpeed,
       pulseSpeed: renderer.pulseSpeed || 1.0,
       textContrastStyle: renderer.textContrastStyle || 'stroke_shadow',
       minimapMode: renderer.minimapMode || 'overview',
       minimapFollowZoom: renderer.minimapFollowZoom || 13.5,
       waypoints: JSON.parse(JSON.stringify(renderer.waypoints || [])),
+      waypointOffsetSec: renderer.waypointOffsetSec !== undefined ? renderer.waypointOffsetSec : 0.0,
+      waypointDurationSec: renderer.waypointDurationSec !== undefined ? renderer.waypointDurationSec : 3.0,
+      timeMilestones: JSON.parse(JSON.stringify(renderer.timeMilestones || [])),
+      clockConfig: JSON.parse(JSON.stringify(renderer.clockConfig || {})),
       spotlight: JSON.parse(JSON.stringify(renderer.spotlight || {})),
       speedKeyframes: JSON.parse(JSON.stringify(speedKeyframes || [])),
-      zoomKeyframes: JSON.parse(JSON.stringify(renderer.zoomKeyframes || []))
+      zoomKeyframes: JSON.parse(JSON.stringify(renderer.zoomKeyframes || [])),
+      camZoom: renderer.camZoom,
+      camPitch: renderer.camPitch,
+      camDamping: renderer.camDamping,
+      viewportZoom: renderer.viewportZoom,
+      viewportPan: JSON.parse(JSON.stringify(renderer.viewportPan || { x: 0, y: 0 })),
+      backdropOpacity: renderer.backdropOpacity
     };
   }
 
@@ -219,6 +236,69 @@ document.addEventListener('DOMContentLoaded', () => {
       if (durSlider) durSlider.value = s.waypointDurationSec;
     }
     if (typeof updateWpTimingLabels === 'function') updateWpTimingLabels();
+
+    if (s.startCityName !== undefined) {
+      renderer.startCityName = s.startCityName;
+      if (startCityInput) startCityInput.value = s.startCityName;
+    }
+    if (s.finishCityName !== undefined) {
+      renderer.finishCityName = s.finishCityName;
+      if (finishCityInput) finishCityInput.value = s.finishCityName;
+    }
+    if (s.timeMilestones) {
+      renderer.timeMilestones = JSON.parse(JSON.stringify(s.timeMilestones));
+      if (typeof renderTimeMilestonesTable === 'function') renderTimeMilestonesTable();
+    }
+    if (s.trimInKm !== undefined) {
+      renderer.trimInKm = s.trimInKm;
+      if (trimInKmInput) trimInKmInput.value = s.trimInKm.toFixed(1);
+    }
+    if (s.trimOutKm !== undefined) {
+      renderer.trimOutKm = s.trimOutKm;
+      if (trimOutKmInput) trimOutKmInput.value = s.trimOutKm.toFixed(1);
+    }
+    if (typeof updateTrim === 'function') updateTrim();
+    if (s.dotSize !== undefined) {
+      renderer.dotSize = s.dotSize;
+      const dotSlider = document.getElementById('dotSizeSlider');
+      if (dotSlider) dotSlider.value = s.dotSize;
+    }
+    if (s.camZoom !== undefined) {
+      renderer.camZoom = s.camZoom;
+      const cZoomSlider = document.getElementById('camZoomSlider');
+      const cZoomVal = document.getElementById('camZoomVal');
+      if (cZoomSlider) cZoomSlider.value = s.camZoom;
+      if (cZoomVal) cZoomVal.textContent = `${s.camZoom.toFixed(1)}x`;
+    }
+    if (s.camPitch !== undefined) {
+      renderer.camPitch = s.camPitch;
+      const cPitchSlider = document.getElementById('camPitchSlider');
+      const cPitchVal = document.getElementById('camPitchVal');
+      if (cPitchSlider) cPitchSlider.value = s.camPitch;
+      if (cPitchVal) cPitchVal.textContent = `${s.camPitch}°`;
+    }
+    if (s.camDamping !== undefined) renderer.camDamping = s.camDamping;
+    if (s.backdropOpacity !== undefined) {
+      renderer.backdropOpacity = s.backdropOpacity;
+      const bSlider = document.getElementById('backdropOpacitySlider');
+      const bVal = document.getElementById('backdropOpacityVal');
+      if (bSlider) bSlider.value = Math.round(s.backdropOpacity * 100);
+      if (bVal) bVal.textContent = `${Math.round(s.backdropOpacity * 100)}%`;
+    }
+    if (s.viewportZoom !== undefined) {
+      renderer.viewportZoom = s.viewportZoom;
+      const vpSlider = document.getElementById('splitZoomSlider');
+      const vpVal = document.getElementById('splitZoomVal');
+      if (vpSlider) vpSlider.value = s.viewportZoom;
+      if (vpVal) vpVal.textContent = `${s.viewportZoom.toFixed(1)}x`;
+    }
+    if (s.viewportPan) {
+      renderer.viewportPan = { ...s.viewportPan };
+      const pX = document.getElementById('splitPanXSlider');
+      const pY = document.getElementById('splitPanYSlider');
+      if (pX && s.viewportPan.x !== undefined) pX.value = s.viewportPan.x;
+      if (pY && s.viewportPan.y !== undefined) pY.value = s.viewportPan.y;
+    }
 
     if (s.durationSec) {
       state.durationSec = s.durationSec;
@@ -1149,9 +1229,16 @@ document.addEventListener('DOMContentLoaded', () => {
       ctx.fillText(`${sVal.toFixed(1)}x`, 6, y - 3);
     });
 
-    // 2. Playhead cursor
-    const curP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-    const curX = toX(curP);
+    // 2. Playhead cursor (normalized to active clip progress)
+    let clipP;
+    if (state.trimMode === 'fit') {
+      clipP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+    } else {
+      const tSpan = Math.max(0.0001, renderer.trimOut - renderer.trimIn);
+      const curP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+      clipP = Math.max(0, Math.min(1, (curP - renderer.trimIn) / tSpan));
+    }
+    const curX = toX(clipP);
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -1220,6 +1307,40 @@ document.addEventListener('DOMContentLoaded', () => {
       speedKeyframes.push({ progress: newP, speed: Number(newS.toFixed(2)) });
       speedKeyframes.sort((a, b) => a.progress - b.progress);
       drawSpeedCurve();
+    }
+  });
+
+  speedCurveCanvas.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    const rect = speedCurveCanvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (speedCurveCanvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (speedCurveCanvas.height / rect.height);
+
+    const minS = 0.25;
+    const maxS = 4.0;
+    const h = speedCurveCanvas.height;
+    const toY = (sVal) => h - ((sVal - minS) / (maxS - minS)) * (h - 20) - 10;
+    const toX = (pVal) => pVal * speedCurveCanvas.width;
+
+    let hitIdx = -1;
+    speedKeyframes.forEach((k, idx) => {
+      const kx = toX(k.progress);
+      const ky = toY(k.speed);
+      if (Math.hypot(mx - kx, my - ky) < 14) hitIdx = idx;
+    });
+
+    if (hitIdx >= 0) {
+      saveStateForUndo('Odstranění bodu rychlosti');
+      if (speedKeyframes.length > 2) {
+        speedKeyframes.splice(hitIdx, 1);
+        if (speedKeyframes[0].progress > 0) speedKeyframes[0].progress = 0.0;
+        if (speedKeyframes[speedKeyframes.length - 1].progress < 1) speedKeyframes[speedKeyframes.length - 1].progress = 1.0;
+      } else {
+        speedKeyframes[hitIdx].speed = 1.0;
+      }
+      drawSpeedCurve();
+      saveCurrentProjectSettings();
+      showToast('🗑️ Bod rychlosti odstraněn');
     }
   });
 
@@ -1576,9 +1697,16 @@ document.addEventListener('DOMContentLoaded', () => {
     state.lastTimestamp = timestamp;
 
     if (state.isPlaying) {
-      // Evaluate speed multiplier from Bezier speed ramp curve!
-      const curProg = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-      const speedMultiplier = getSpeedAtProgress(curProg) * state.playbackSpeed;
+      // Evaluate speed multiplier from Bezier speed ramp curve normalized over active clip!
+      let clipProg;
+      if (state.trimMode === 'fit') {
+        clipProg = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+      } else {
+        const tSpan = Math.max(0.0001, renderer.trimOut - renderer.trimIn);
+        const curProg = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+        clipProg = Math.max(0, Math.min(1, (curProg - renderer.trimIn) / tSpan));
+      }
+      const speedMultiplier = getSpeedAtProgress(clipProg) * state.playbackSpeed;
 
       state.currentTime += deltaTime * speedMultiplier;
 
@@ -3245,9 +3373,13 @@ document.addEventListener('DOMContentLoaded', () => {
       let frameBatch = [];
 
       for (let i = 0; i < totalExportFrames; i++) {
-        const frameTime = (i / (totalExportFrames - 1 || 1)) * state.durationSec;
-        offRenderer.currentTime = frameTime;
-        offRenderer.progress = frameTime / state.durationSec;
+        const norm = i / (totalExportFrames - 1 || 1);
+        if (state.trimMode === 'fit') {
+          offRenderer.currentTime = norm * state.durationSec;
+        } else {
+          offRenderer.currentTime = (offRenderer.trimIn + norm * (offRenderer.trimOut - offRenderer.trimIn)) * state.durationSec;
+        }
+        offRenderer.progress = offRenderer.trimIn + norm * (offRenderer.trimOut - offRenderer.trimIn);
         offRenderer.render(1.0 / chosenFps);
 
         const dataUrl = offscreen.toDataURL('image/png');
@@ -3477,9 +3609,16 @@ document.addEventListener('DOMContentLoaded', () => {
       ctx.fillText(`${zVal.toFixed(1)}x`, 6, y - 3);
     });
 
-    // Playhead cursor
-    const curP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-    const curX = toX(curP);
+    // Playhead cursor (normalized to active clip progress)
+    let clipP;
+    if (state.trimMode === 'fit') {
+      clipP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+    } else {
+      const tSpan = Math.max(0.0001, renderer.trimOut - renderer.trimIn);
+      const curP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+      clipP = Math.max(0, Math.min(1, (curP - renderer.trimIn) / tSpan));
+    }
+    const curX = toX(clipP);
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -3549,6 +3688,41 @@ document.addEventListener('DOMContentLoaded', () => {
         renderer.zoomKeyframes.sort((a, b) => a.progress - b.progress);
         drawZoomCurve();
         saveCurrentProjectSettings();
+      }
+    });
+
+    zoomCurveCanvas.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      const rect = zoomCurveCanvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (zoomCurveCanvas.width / rect.width);
+      const my = (e.clientY - rect.top) * (zoomCurveCanvas.height / rect.height);
+
+      const minZ = 0.5;
+      const maxZ = 5.0;
+      const h = zoomCurveCanvas.height;
+      const toY = (zVal) => h - ((zVal - minZ) / (maxZ - minZ)) * (h - 20) - 10;
+      const toX = (pVal) => pVal * zoomCurveCanvas.width;
+
+      let hitIdx = -1;
+      (renderer.zoomKeyframes || []).forEach((k, idx) => {
+        const kx = toX(k.progress);
+        const ky = toY(k.zoom);
+        if (Math.hypot(mx - kx, my - ky) < 14) hitIdx = idx;
+      });
+
+      if (hitIdx >= 0) {
+        saveStateForUndo('Odstranění bodu přiblížení');
+        if (renderer.zoomKeyframes.length > 2) {
+          renderer.zoomKeyframes.splice(hitIdx, 1);
+          if (renderer.zoomKeyframes[0].progress > 0) renderer.zoomKeyframes[0].progress = 0.0;
+          if (renderer.zoomKeyframes[renderer.zoomKeyframes.length - 1].progress < 1) renderer.zoomKeyframes[renderer.zoomKeyframes.length - 1].progress = 1.0;
+        } else {
+          renderer.zoomKeyframes[hitIdx].zoom = 2.2;
+        }
+        drawZoomCurve();
+        saveCurrentProjectSettings();
+        if (!state.isPlaying) renderer.render();
+        showToast('🗑️ Bod přiblížení odstraněn');
       }
     });
 
@@ -3709,102 +3883,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function applySnapshotConfig(cfg) {
     if (!cfg) return;
-    if (cfg.colors) {
-      renderer.colors = { ...renderer.colors, ...cfg.colors };
-      if (colorPath) { colorPath.value = renderer.colors.path; colorPathVal.textContent = renderer.colors.path.toUpperCase(); }
-      if (colorElevation) { colorElevation.value = renderer.colors.elevation; colorElevationVal.textContent = renderer.colors.elevation.toUpperCase(); }
-      if (colorText) { colorText.value = renderer.colors.text; colorTextVal.textContent = renderer.colors.text.toUpperCase(); }
-      if (colorRiver) { colorRiver.value = renderer.colors.river; colorRiverVal.textContent = renderer.colors.river.toUpperCase(); }
-      const colorUnitsEl = document.getElementById('colorUnits');
-      const colorUnitsValEl = document.getElementById('colorUnitsVal');
-      if (colorUnitsEl && renderer.colors.units) {
-        colorUnitsEl.value = renderer.colors.units;
-        if (colorUnitsValEl) colorUnitsValEl.textContent = renderer.colors.units.toUpperCase();
-      }
-      const cWpPin = document.getElementById('colorWaypointPin');
-      const cWpPinVal = document.getElementById('colorWaypointPinVal');
-      if (cWpPin && renderer.colors.waypointPin) {
-        cWpPin.value = renderer.colors.waypointPin;
-        if (cWpPinVal) cWpPinVal.textContent = renderer.colors.waypointPin.toUpperCase();
-      }
-      const cWpTxt = document.getElementById('colorWaypointText');
-      const cWpTxtVal = document.getElementById('colorWaypointTextVal');
-      if (cWpTxt && renderer.colors.waypointText) {
-        cWpTxt.value = renderer.colors.waypointText;
-        if (cWpTxtVal) cWpTxtVal.textContent = renderer.colors.waypointText.toUpperCase();
-      }
-      const cMw = document.getElementById('colorMotorways');
-      const cMwVal = document.getElementById('colorMotorwaysVal');
-      if (cMw && renderer.colors.motorways) {
-        cMw.value = renderer.colors.motorways;
-        if (cMwVal) cMwVal.textContent = renderer.colors.motorways.toUpperCase();
-      }
-      const cRd = document.getElementById('colorRoads');
-      const cRdVal = document.getElementById('colorRoadsVal');
-      if (cRd && renderer.colors.roads) {
-        cRd.value = renderer.colors.roads;
-        if (cRdVal) cRdVal.textContent = renderer.colors.roads.toUpperCase();
-      }
-    }
-    if (cfg.hudScale) {
-      renderer.hudScale = cfg.hudScale;
-      if (hudScaleSlider) hudScaleSlider.value = cfg.hudScale;
-      if (hudScaleVal) hudScaleVal.textContent = `${cfg.hudScale.toFixed(2)}x`;
-    }
-    if (cfg.layout) {
-      renderer.hudLayout = { ...renderer.hudLayout, ...cfg.layout };
-    }
-    if (cfg.toggles) {
-      renderer.toggles = { ...renderer.toggles, ...cfg.toggles };
-    }
-    if (cfg.lod) {
-      renderer.lod = { ...renderer.lod, ...cfg.lod };
-    }
-    if (cfg.mapStyle) {
-      setMapStyle(cfg.mapStyle);
-    }
-    if (cfg.animationMode) {
-      renderer.animationMode = cfg.animationMode;
-      if (animModeSelect) animModeSelect.value = cfg.animationMode;
-    }
-    if (cfg.trimIn !== undefined) {
-      renderer.trimIn = cfg.trimIn;
-      if (trimInSlider) trimInSlider.value = Math.round(cfg.trimIn * 100);
-    }
-    if (cfg.trimOut !== undefined) {
-      renderer.trimOut = cfg.trimOut;
-      if (trimOutSlider) trimOutSlider.value = Math.round(cfg.trimOut * 100);
-    }
-    if (cfg.trimMode) {
-      state.trimMode = cfg.trimMode;
-      const bSlice = document.getElementById('btnTrimModeSlice');
-      const bFit = document.getElementById('btnTrimModeFit');
-      if (bSlice) bSlice.classList.toggle('active', cfg.trimMode === 'slice');
-      if (bFit) bFit.classList.toggle('active', cfg.trimMode === 'fit');
-    }
-    if (cfg.durationSec) {
-      state.durationSec = cfg.durationSec;
-      const cDur = document.getElementById('customDurationInput');
-      if (cDur) cDur.value = cfg.durationSec;
-      updateTimeDisplay();
-    }
-    if (cfg.waypoints) {
-      renderer.waypoints = JSON.parse(JSON.stringify(cfg.waypoints));
-      updateWaypointsUI();
-      renderTimelineWaypoints();
-    }
-    if (cfg.spotlight) {
-      renderer.spotlight = { ...renderer.spotlight, ...cfg.spotlight };
-    }
-    if (cfg.speedKeyframes) {
-      speedKeyframes = JSON.parse(JSON.stringify(cfg.speedKeyframes));
-      drawSpeedCurve();
-    }
-    if (cfg.zoomKeyframes) {
-      renderer.zoomKeyframes = JSON.parse(JSON.stringify(cfg.zoomKeyframes));
-      drawZoomCurve();
-    }
-    if (!state.isPlaying) renderer.render();
+    saveStateForUndo('Aktivace snímku');
+    applyHistoryState(cfg);
+    showToast('✓ Snímek scény aktivován');
   }
 
   if (btnSaveSnapshot && snapshotNameInput) {

@@ -14,8 +14,11 @@ class LabelCollisionResolver {
     this.boxes = [];
   }
 
-  canPlace(x, y, w, h, pad = 6) {
-    const b1 = { x1: x - pad, y1: y - pad, x2: x + w + pad, y2: y + h + pad };
+  canPlace(x, y, w, h, padX = 14, padY = 6) {
+    if (typeof padX === 'number' && padY === undefined) {
+      padY = padX;
+    }
+    const b1 = { x1: x - padX, y1: y - padY, x2: x + w + padX, y2: y + h + padY };
     for (const b2 of this.boxes) {
       if (!(b1.x2 < b2.x1 || b1.x1 > b2.x2 || b1.y2 < b2.y1 || b1.y1 > b2.y2)) {
         return false;
@@ -24,9 +27,12 @@ class LabelCollisionResolver {
     return true;
   }
 
-  place(x, y, w, h, pad = 6) {
-    if (this.canPlace(x, y, w, h, pad)) {
-      this.boxes.push({ x1: x - pad, y1: y - pad, x2: x + w + pad, y2: y + h + pad });
+  place(x, y, w, h, padX = 14, padY = 6) {
+    if (typeof padX === 'number' && padY === undefined) {
+      padY = padX;
+    }
+    if (this.canPlace(x, y, w, h, padX, padY)) {
+      this.boxes.push({ x1: x - padX, y1: y - padY, x2: x + w + padX, y2: y + h + padY });
       return true;
     }
     return false;
@@ -808,13 +814,14 @@ class CanvasRenderer {
     }
 
     // Screen-space label collision resolution: dynamically suppresses overlapping names (e.g. Sedlec-Prčice & Miličín)
-    const approxCharWidth = fontSize * s * 0.62;
-    const boxW = name.length * approxCharWidth + 12 * s;
-    const boxH = fontSize * s * 1.5;
-    const boxX = x + 6 * s;
+    ctx.font = `${fontWeight} ${fontSize * s}px Inter, sans-serif`;
+    const tw = ctx.measureText(name).width;
+    const boxW = tw + (dotRadius + 12) * s;
+    const boxH = fontSize * s * 1.6;
+    const boxX = x - (dotRadius + 4) * s;
     const boxY = y - boxH / 2;
 
-    if (!this.collisionResolver.place(boxX, boxY, boxW, boxH, 4 * s)) {
+    if (!this.collisionResolver.place(boxX, boxY, boxW, boxH, 14 * s, 6 * s)) {
       return false; // Suppressed due to collision with higher priority or already placed label
     }
 
@@ -1170,6 +1177,19 @@ class CanvasRenderer {
       ctx.restore();
     }
 
+    // 0B. Pre-reserve collision boxes for START and FINISH badges so cities don't overlap them
+    const points = this.getSmoothedPoints();
+    const n = points.length;
+
+    if (this.toggles.startMarker !== false && points.length > 0) {
+      const startPt = toScreen(points[0].merc_x, points[0].merc_y);
+      this.collisionResolver.place(startPt.x - 75 * s, startPt.y - 36 * s, 150 * s, 42 * s, 10 * s, 6 * s);
+    }
+    if (this.toggles.finishMarker !== false && points.length > 0) {
+      const finishPt = toScreen(points[n - 1].merc_x, points[n - 1].merc_y);
+      this.collisionResolver.place(finishPt.x - 75 * s, finishPt.y - 36 * s, 150 * s, 42 * s, 10 * s, 6 * s);
+    }
+
     // 1. Background Map (Style A Tile Engine or Style B Vector)
     if (this.toggles.bgMap) {
       if (this.mapStyle === 'vector') {
@@ -1198,9 +1218,6 @@ class CanvasRenderer {
     }
 
     // 3. Full Route Underlay (Smoothed)
-    const points = this.getSmoothedPoints();
-    const n = points.length;
-
     ctx.beginPath();
     for (let i = 0; i < n; i++) {
       const pt = toScreen(points[i].merc_x, points[i].merc_y);
@@ -1247,8 +1264,8 @@ class CanvasRenderer {
       this.drawStartFinishMarker(ctx, finishPt.x, finishPt.y, `CÍL • ${this.finishCityName}`, this.colors.finishMarker, isFinished);
     }
 
-    // 7. En-Route Milestone Badges
-    if (this.toggles.landmarks && this.landmarks) {
+    // 7. En-Route Milestone Badges (only if vector layers not active, to prevent duplicate city points)
+    if (this.toggles.landmarks && this.landmarks && (!this.vectorLayers || this.mapStyle !== 'vector')) {
       for (const lm of this.landmarks) {
         const mxmy = this.latLonToMercator(lm.lat, lm.lon);
         if (mxmy.x >= b.min_mx && mxmy.x <= b.max_mx && mxmy.y >= b.min_my && mxmy.y <= b.max_my) {
@@ -1405,6 +1422,19 @@ class CanvasRenderer {
       };
     };
 
+    // 0B. Pre-reserve collision boxes for START and FINISH badges
+    const points = this.getSmoothedPoints();
+    const n = points.length;
+
+    if (this.toggles.startMarker !== false && points.length > 0) {
+      const startPt = toScreen(points[0].merc_x, points[0].merc_y);
+      this.collisionResolver.place(startPt.x - 75 * s, startPt.y - 36 * s, 150 * s, 42 * s, 10 * s, 6 * s);
+    }
+    if (this.toggles.finishMarker !== false && points.length > 0) {
+      const finishPt = toScreen(points[n - 1].merc_x, points[n - 1].merc_y);
+      this.collisionResolver.place(finishPt.x - 75 * s, finishPt.y - 36 * s, 150 * s, 42 * s, 10 * s, 6 * s);
+    }
+
     // 1. Background Map for right area (if toggles.bgMap)
     if (this.toggles.bgMap) {
       if (this.mapStyle === 'vector') {
@@ -1432,9 +1462,6 @@ class CanvasRenderer {
     }
 
     // 2. Full Route Underlay (Smoothed)
-    const points = this.getSmoothedPoints();
-    const n = points.length;
-
     ctx.beginPath();
     for (let i = 0; i < n; i++) {
       const pt = toScreen(points[i].merc_x, points[i].merc_y);
@@ -1481,8 +1508,8 @@ class CanvasRenderer {
       this.drawStartFinishMarker(ctx, finishPt.x, finishPt.y, `CÍL • ${this.finishCityName}`, this.colors.finishMarker, isFinished);
     }
 
-    // 6. En-Route Milestone Badges
-    if (this.toggles.landmarks && this.landmarks) {
+    // 6. En-Route Milestone Badges (only if vector layers not active, to prevent duplicate city points)
+    if (this.toggles.landmarks && this.landmarks && (!this.vectorLayers || this.mapStyle !== 'vector')) {
       for (const lm of this.landmarks) {
         if (lm.id && !this.isFeatureVisible(lm.id)) continue;
         const mxmy = this.latLonToMercator(lm.lat, lm.lon);
@@ -2029,10 +2056,10 @@ class CanvasRenderer {
 
   drawLandmarkLabel(ctx, x, y, name, category, s) {
     ctx.save();
-    ctx.font = `500 ${10.5 * s}px Inter, sans-serif`;
+    ctx.font = `600 ${10.5 * s}px Inter, sans-serif`;
     const w = ctx.measureText(name).width;
 
-    if (this.collisionResolver.place(x + 6 * s, y - 8 * s, w, 16 * s)) {
+    if (this.collisionResolver.place(x - 5 * s, y - 8 * s, w + 16 * s, 16 * s, 14 * s, 6 * s)) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
       ctx.beginPath();
       ctx.arc(x, y, 3.5 * s, 0, Math.PI * 2);
@@ -2846,7 +2873,9 @@ class CanvasRenderer {
     const s = this.hudScale;
 
     // Dynamic zoom evaluated from Zoom Ramp curve + user camera zoom slider
-    const rampZoom = this.getZoomAtProgress(this.progress);
+    const tSpan = Math.max(0.0001, (this.trimOut - this.trimIn));
+    const clipProgress = Math.max(0, Math.min(1, (this.progress - this.trimIn) / tSpan));
+    const rampZoom = this.getZoomAtProgress(clipProgress);
     const userCamZoom = (this.camZoom !== undefined && !isNaN(this.camZoom)) ? this.camZoom : 2.2;
     const tileZoom = Math.max(8, Math.min(18, 10.0 + userCamZoom * 1.5 + (rampZoom - 2.2) * 1.2));
 
@@ -2941,8 +2970,8 @@ class CanvasRenderer {
       this.drawPulsingRiderDot(ctx, tip.x, tip.y, s);
     }
 
-    // 5. Landmarks along corridor
-    if (this.toggles.landmarks && this.landmarks) {
+    // 5. Landmarks along corridor (only if vector layers not active, to prevent duplicate city points)
+    if (this.toggles.landmarks && this.landmarks && (!this.vectorLayers || this.mapStyle !== 'vector')) {
       for (const lm of this.landmarks) {
         const mxmy = this.latLonToMercator(lm.lat, lm.lon);
         const lPt = this.mercToScreenTiles(mxmy.x, mxmy.y, this.camMercX, this.camMercY, tileZoom, w, h);
