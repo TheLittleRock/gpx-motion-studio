@@ -1,36 +1,27 @@
 version: '3.8'
 
 services:
-  gpx-studio:
+  gpx-motion-studio:
+    image: ghcr.io/thelittlerock/gpx-motion-studio:latest
     build:
       context: .
       dockerfile: Dockerfile
     container_name: gpx-motion-studio
     restart: unless-stopped
     ports:
-      - "${PORT:-8765}:8000"
+      - "8000:8000"
     volumes:
-      # Persistent SQLite project management database
+      # Persistent SQLite database, vector cache & projects
       - ./data:/app/data
-      # Exported ProRes 4444 movies and Fusion settings
+      # Exported videos (Apple ProRes 4444, WebM Transparent, MP4 H.264)
       - ./exports:/app/exports
-      # Optional local GPX route files
+      # User assets (GPX routes, background photos, maps)
       - ./assets:/app/assets
-      # Live application mounts
-      - ./static:/app/static
-      - ./server.py:/app/server.py
-      - ./database.py:/app/database.py
-      - ./vector_map_engine.py:/app/vector_map_engine.py
-      - ./tile_service.py:/app/tile_service.py
-      - ./gpx_parser.py:/app/gpx_parser.py
-      - ./fusion_generator.py:/app/fusion_generator.py
-      - ./map_stitcher.py:/app/map_stitcher.py
-      - ./landmarks_data.py:/app/landmarks_data.py
     environment:
       - PYTHONUNBUFFERED=1
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/projects"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/version"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
       start_period: 10s

@@ -20,8 +20,14 @@ import json
 from database import ProjectDatabase
 from vector_map_engine import VectorMapEngine
 from tile_service import tile_service
+from version import VERSION, APP_NAME, RELEASE_DATE
 
-app = FastAPI(title="Rekola GPX & Map Motion Graphics Studio", version="2.0.0")
+app = FastAPI(title=f"{APP_NAME} v{VERSION}", version=VERSION)
+
+@app.get("/api/version")
+async def get_app_version():
+    """Returns current software version and release metadata."""
+    return {"version": VERSION, "name": APP_NAME, "release_date": RELEASE_DATE}
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -314,9 +320,22 @@ async def delete_project(project_id: str):
 # ==================== VECTOR MAP API ====================
 
 @app.get("/api/vector-map/{project_id}")
-async def get_vector_map(project_id: str):
-    """Returns multi-layered vector geometries for Style B Vector Map."""
-    layers = vector_engine.get_corridor_vector_layers(project_id)
+async def get_vector_map(project_id: str, gpx_filename: Optional[str] = Query(None)):
+    """Returns multi-layered vector geometries for Style B Vector Map dynamically calculated for the GPX 35km corridor."""
+    gpx_points = None
+    if gpx_filename:
+        safe_name = Path(gpx_filename).name
+        target_path = BASE_DIR / safe_name
+        if not target_path.exists():
+            target_path = ASSETS_DIR / safe_name
+        if target_path.exists() and target_path.suffix.lower() == ".gpx":
+            try:
+                gpx_data = gpx_parser.parse_gpx_file(str(target_path))
+                gpx_points = gpx_data.get("points")
+            except Exception as e:
+                print(f"Warning parsing GPX for corridor: {e}")
+
+    layers = vector_engine.get_corridor_vector_layers(project_id, gpx_points=gpx_points, corridor_km=35.0)
     return {"status": "success", "layers": layers}
 
 # ==================== SETTINGS & SAFE SECRETS API ====================
@@ -494,9 +513,12 @@ async def upload_asset(file: UploadFile = File(...)):
 
     # If it's a GPX file, parse it right away so frontend can use it instantly
     gpx_data = None
+    vector_layers = None
     if ext == ".gpx":
         try:
             gpx_data = gpx_parser.parse_gpx_file(str(dest_path))
+            if gpx_data and gpx_data.get("points"):
+                vector_layers = vector_engine.get_corridor_vector_layers(gpx_points=gpx_data.get("points"), corridor_km=35.0)
         except Exception as e:
             # Still successful upload, but report parse error if any
             print(f"Warning parsing uploaded GPX {raw_name}: {e}")
@@ -506,7 +528,8 @@ async def upload_asset(file: UploadFile = File(...)):
         "filename": raw_name,
         "type": "gpx" if ext == ".gpx" else "image",
         "url": f"/{raw_name}",
-        "gpx_data": gpx_data
+        "gpx_data": gpx_data,
+        "vector_layers": vector_layers
     }
 
 @app.post("/api/export/start")

@@ -46,6 +46,9 @@ class CanvasRenderer {
     
     this.width = 1920;
     this.height = 1080;
+    this.refWidth = 1920;
+    this.refHeight = 1080;
+    this.canvasScaleFactor = 1.0;
     
     // Animation Modes:
     // 'hud'        (Mode 1: Transparent Telemetry HUD)
@@ -641,6 +644,96 @@ class CanvasRenderer {
     return { x, y };
   }
 
+  // --- CATMULL-ROM CENTRIPETAL SPLINE SUBDIVIDER FOR RIVERS & ROADS ---
+  subdivideCatmullRom(points, subdivisions = 4) {
+    if (!points || points.length < 2) return points;
+    if (subdivisions <= 1) return points;
+
+    const result = [];
+    const n = points.length;
+
+    for (let i = 0; i < n - 1; i++) {
+      const p0 = points[Math.max(0, i - 1)];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[Math.min(n - 1, i + 2)];
+
+      for (let s = 0; s < subdivisions; s++) {
+        const t = s / subdivisions;
+        const t2 = t * t;
+        const t3 = t2 * t;
+
+        const mx = 0.5 * (
+          (2 * p1.mx) +
+          (-p0.mx + p2.mx) * t +
+          (2 * p0.mx - 5 * p1.mx + 4 * p2.mx - p3.mx) * t2 +
+          (-p0.mx + 3 * p1.mx - 3 * p2.mx + p3.mx) * t3
+        );
+        const my = 0.5 * (
+          (2 * p1.my) +
+          (-p0.my + p2.my) * t +
+          (2 * p0.my - 5 * p1.my + 4 * p2.my - p3.my) * t2 +
+          (-p0.my + 3 * p1.my - 3 * p2.my + p3.my) * t3
+        );
+
+        result.push({ mx, my });
+      }
+    }
+    result.push({ mx: points[n - 1].mx, my: points[n - 1].my });
+    return result;
+  }
+
+  // Exact distance-based track interpolation (monotonic synchronization with HUD odometer)
+  getTrackInterpolationAtProgress(prog) {
+    if (!this.gpxData || !this.gpxData.points || this.gpxData.points.length === 0) return null;
+    const points = this.gpxData.points;
+    const totalPts = points.length;
+    if (totalPts === 1) {
+      return { idx0: 0, idx1: 0, interp: 0, p0: points[0], p1: points[0], targetDist: points[0].dist_km || 0, exactIndex: 0 };
+    }
+
+    const totalDist = (this.gpxData.total_distance_km !== undefined && this.gpxData.total_distance_km > 0)
+      ? this.gpxData.total_distance_km
+      : (points[totalPts - 1].dist_km || 1);
+
+    const clampedProg = Math.max(0, Math.min(1, prog));
+    const targetDist = clampedProg * totalDist;
+
+    // Binary search for idx such that points[mid].dist_km <= targetDist
+    let low = 0;
+    let high = totalPts - 1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      if (points[mid].dist_km <= targetDist) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    const idx0 = Math.max(0, Math.min(totalPts - 2, high));
+    const idx1 = idx0 + 1;
+    const p0 = points[idx0];
+    const p1 = points[idx1];
+    const segDist = Math.max(0.000001, (p1.dist_km || 0) - (p0.dist_km || 0));
+    const interp = Math.max(0, Math.min(1, (targetDist - (p0.dist_km || 0)) / segDist));
+    const exactIndex = idx0 + interp;
+
+    return {
+      idx0,
+      idx1,
+      interp,
+      p0,
+      p1,
+      targetDist,
+      exactIndex
+    };
+  }
+
+  getTrackIndexAtProgress(prog) {
+    const info = this.getTrackInterpolationAtProgress(prog);
+    return info ? info.idx0 : 0;
+  }
+
   // MAIN 60FPS RENDER LOOP
   render(deltaTime = 0.016) {
     this.pulsePhase += deltaTime * 3.5 * (this.pulseSpeed || 1.0);
@@ -654,20 +747,25 @@ class CanvasRenderer {
       return;
     }
 
+    // Unified 1:1 Reference Coordinate System Scaling (1920x1080 native coordinates)
+    const scaleFactor = this.canvasScaleFactor || (this.width / 1920);
+    const needScale = Math.abs(scaleFactor - 1.0) > 0.0001;
+    if (needScale) {
+      ctx.save();
+      ctx.scale(scaleFactor, scaleFactor);
+    }
+
     const effectiveProgress = Math.max(this.trimIn, Math.min(this.trimOut, this.progress));
-    const points = this.gpxData.points;
-    const totalPts = points.length;
-    const exactIndex = effectiveProgress * (totalPts - 1);
-    const idx0 = Math.floor(exactIndex);
-    const idx1 = Math.min(totalPts - 1, idx0 + 1);
-    const interp = exactIndex - idx0;
+    const interpInfo = this.getTrackInterpolationAtProgress(effectiveProgress);
+    if (!interpInfo) {
+      if (needScale) ctx.restore();
+      return;
+    }
 
-    const p0 = points[idx0];
-    const p1 = points[idx1];
-
-    const currentDist = p0.dist_km + (p1.dist_km - p0.dist_km) * interp;
+    const { idx0, idx1, interp, p0, p1, targetDist, exactIndex } = interpInfo;
+    const currentDist = targetDist;
     const currentEle = p0.ele + (p1.ele - p0.ele) * interp;
-    const currentGrade = p0.grade + (p1.grade - p0.grade) * interp;
+    const currentGrade = (p0.grade !== undefined && p1.grade !== undefined) ? p0.grade + (p1.grade - p0.grade) * interp : (p0.grade || 0);
     const currentMercX = p0.merc_x + (p1.merc_x - p0.merc_x) * interp;
     const currentMercY = p0.merc_y + (p1.merc_y - p0.merc_y) * interp;
 
@@ -696,6 +794,10 @@ class CanvasRenderer {
     if (this.selectedElement || this.isDragging) {
       this.drawSafeZoneGuides(ctx);
       this.drawGizmoHandles(ctx);
+    }
+
+    if (needScale) {
+      ctx.restore();
     }
   }
 
@@ -894,11 +996,16 @@ class CanvasRenderer {
     const filterPtsByMeanders = (pts, meanderLevel) => {
       if (!pts || pts.length <= 2) return pts;
       if (meanderLevel === 1) {
-        return pts.filter((_, idx) => idx === 0 || idx === pts.length - 1 || idx % 4 === 0);
+        return pts.filter((_, idx) => idx === 0 || idx === pts.length - 1 || idx % 3 === 0);
       } else if (meanderLevel === 2) {
-        return pts.filter((_, idx) => idx === 0 || idx === pts.length - 1 || idx % 2 === 0);
+        return pts;
+      } else if (meanderLevel === 3) {
+        return this.subdivideCatmullRom(pts, 4);
+      } else if (meanderLevel === 4) {
+        return this.subdivideCatmullRom(pts, 8);
+      } else {
+        return this.subdivideCatmullRom(pts, 12);
       }
-      return pts;
     };
 
     // 1. Water Bodies: Lakes & Dams (Background)
@@ -947,15 +1054,14 @@ class CanvasRenderer {
         ctx.stroke();
       }
 
-      // 2B. Subtle River Name Labels along polyline curves
+      // 2B. Subtle River Name Labels along curves with smooth zoom cross-fade (stationary stations)
       if (this.lod && this.lod.riverNames !== false) {
         ctx.save();
-        ctx.font = `italic 600 ${10 * s}px Inter, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const riverLabelColor = this.hexToRgba(this.colors.river || '#38bdf8', Math.max(0.45, Math.min(0.85, (rOpacity || 0.35) + 0.30)));
-        const strokeColor = 'rgba(10, 15, 24, 0.85)';
+        const baseOpacity = (rOpacity || 0.35);
+        const strokeColor = 'rgba(10, 15, 24, 0.90)';
 
         for (const r of layers.rivers) {
           if (r.id && !this.isFeatureVisible(r.id)) continue;
@@ -966,58 +1072,77 @@ class CanvasRenderer {
           const screenPts = pts.map(p => toScreen(p.mx, p.my));
 
           let totalLen = 0;
-          const segLens = [];
+          const cumLens = [0];
           for (let i = 0; i < screenPts.length - 1; i++) {
             const d = Math.hypot(screenPts[i + 1].x - screenPts[i].x, screenPts[i + 1].y - screenPts[i].y);
-            segLens.push(d);
             totalLen += d;
+            cumLens.push(totalLen);
           }
 
           if (totalLen < 60 * s) continue;
 
-          // Adaptive repetition: at least 1 label, repeating every ~380px on long/zoomed streams
-          const repeatDist = 380 * s;
-          const count = Math.max(1, Math.floor(totalLen / repeatDist));
-          const stepDist = totalLen / (count + 1);
-
-          for (let c = 1; c <= count; c++) {
-            const targetDist = c * stepDist;
-            let acc = 0;
-
-            for (let i = 0; i < segLens.length; i++) {
-              if (acc + segLens[i] >= targetDist) {
-                const segRem = targetDist - acc;
-                const frac = segLens[i] > 0 ? (segRem / segLens[i]) : 0.5;
+          // Helper to sample position & angle along curve at distance fraction (0.0 to 1.0)
+          const sampleCurveAtFraction = (frac) => {
+            const target = frac * totalLen;
+            for (let i = 0; i < cumLens.length - 1; i++) {
+              if (cumLens[i + 1] >= target) {
+                const segLen = cumLens[i + 1] - cumLens[i];
+                const t = segLen > 0 ? (target - cumLens[i]) / segLen : 0;
                 const pA = screenPts[i];
                 const pB = screenPts[i + 1];
-                const lx = pA.x + (pB.x - pA.x) * frac;
-                const ly = pA.y + (pB.y - pA.y) * frac;
-
-                if (lx < 10 || lx > this.width - 10 || ly < 10 || ly > this.height - 10) break;
-
                 let angle = Math.atan2(pB.y - pA.y, pB.x - pA.x);
                 if (angle > Math.PI / 2) angle -= Math.PI;
                 else if (angle < -Math.PI / 2) angle += Math.PI;
-
-                const textW = ctx.measureText(r.name).width;
-                const textH = 14 * s;
-
-                if (this.collisionResolver.place(lx - textW / 2, ly - textH / 2, textW, textH, 14 * s, 8 * s)) {
-                  ctx.save();
-                  ctx.translate(lx, ly);
-                  ctx.rotate(angle);
-
-                  ctx.lineWidth = 2.5 * s;
-                  ctx.strokeStyle = strokeColor;
-                  ctx.strokeText(`〰 ${r.name}`, 0, 0);
-
-                  ctx.fillStyle = riverLabelColor;
-                  ctx.fillText(`〰 ${r.name}`, 0, 0);
-                  ctx.restore();
-                }
-                break;
+                return {
+                  x: pA.x + (pB.x - pA.x) * t,
+                  y: pA.y + (pB.y - pA.y) * t,
+                  angle
+                };
               }
-              acc += segLens[i];
+            }
+            return null;
+          };
+
+          // Hierarchical stations anchored at stationary relative points along the river
+          const stations = [
+            { frac: 0.50, minScreenLen: 70 * s, fullScreenLen: 120 * s },
+            { frac: 0.25, minScreenLen: 300 * s, fullScreenLen: 460 * s },
+            { frac: 0.75, minScreenLen: 300 * s, fullScreenLen: 460 * s },
+            { frac: 0.125, minScreenLen: 750 * s, fullScreenLen: 1000 * s },
+            { frac: 0.375, minScreenLen: 750 * s, fullScreenLen: 1000 * s },
+            { frac: 0.625, minScreenLen: 750 * s, fullScreenLen: 1000 * s },
+            { frac: 0.875, minScreenLen: 750 * s, fullScreenLen: 1000 * s }
+          ];
+
+          for (const st of stations) {
+            if (totalLen < st.minScreenLen) continue;
+            const alphaFactor = Math.min(1.0, (totalLen - st.minScreenLen) / Math.max(1, st.fullScreenLen - st.minScreenLen));
+            if (alphaFactor <= 0.02) continue;
+
+            const sample = sampleCurveAtFraction(st.frac);
+            if (!sample) continue;
+            const { x: lx, y: ly, angle } = sample;
+
+            if (lx < 10 || lx > 1920 - 10 || ly < 10 || ly > 1080 - 10) continue;
+
+            const fontSize = Math.max(9, Math.min(11.5, 9.5 * s));
+            ctx.font = `italic 600 ${fontSize}px Inter, sans-serif`;
+            const textW = ctx.measureText(r.name).width;
+            const textH = fontSize * 1.4;
+
+            if (this.collisionResolver.place(lx - textW / 2, ly - textH / 2, textW, textH, 12 * s, 8 * s)) {
+              ctx.save();
+              ctx.globalAlpha = alphaFactor;
+              ctx.translate(lx, ly);
+              ctx.rotate(angle);
+
+              ctx.lineWidth = 2.5 * s;
+              ctx.strokeStyle = strokeColor;
+              ctx.strokeText(`〰 ${r.name}`, 0, 0);
+
+              ctx.fillStyle = this.hexToRgba(this.colors.river || '#38bdf8', Math.max(0.45, Math.min(0.92, baseOpacity + 0.35)));
+              ctx.fillText(`〰 ${r.name}`, 0, 0);
+              ctx.restore();
             }
           }
         }
@@ -1214,8 +1339,8 @@ class CanvasRenderer {
   // --- MODE 3: WHOLE TRIP ROUTE SHOWCASE OVERVIEW ---
   renderModeFullscreenRoute(idx0, interp, curMercX, curMercY, progress, dist, ele) {
     const ctx = this.ctx;
-    const w = this.width;
-    const h = this.height;
+    const w = 1920;
+    const h = 1080;
     const s = this.hudScale;
 
     ctx.save();
@@ -1308,7 +1433,7 @@ class CanvasRenderer {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
-    const startIdx = Math.floor(this.trimIn * (n - 1));
+    const startIdx = this.getTrackIndexAtProgress(this.trimIn);
 
     // 3B. Pre-Trim Completed Route (Segment from 0 to startIdx rendered as already ridden)
     if (startIdx > 0) {
@@ -1424,12 +1549,26 @@ class CanvasRenderer {
     ctx.fill();
     ctx.stroke();
 
-    // Subtle label above pin with selected textContrastStyle
+    // Subtle label above pin with selected textContrastStyle & collision avoidance
     const title = wp.title || 'Bod';
     ctx.font = `700 ${9.5 * s}px Inter, sans-serif`;
+    const tw = ctx.measureText(title).width;
+    const th = 12 * s;
+    const labelY = y - 7 * s;
+
+    const boxX = x - tw / 2 - 8 * s;
+    const boxY = labelY - th - 4 * s;
+    const boxW = tw + 16 * s;
+    const boxH = th + 8 * s;
+
+    // Check collision with other labels, cities, markers
+    if (this.collisionResolver && !this.collisionResolver.place(boxX, boxY, boxW, boxH, 10 * s, 6 * s)) {
+      ctx.restore();
+      return;
+    }
+
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    const labelY = y - 7 * s;
 
     if (textStyle === 'pill') {
       const tw = ctx.measureText(title).width;
@@ -1468,8 +1607,8 @@ class CanvasRenderer {
   // --- MODE 5: CELÁ TRASA (BOČNÍ SPLIT) ---
   renderModeSplitRoute(idx0, interp, curMercX, curMercY, progress, dist, ele, grade) {
     const ctx = this.ctx;
-    const w = this.width;
-    const h = this.height;
+    const w = 1920;
+    const h = 1080;
     const s = this.hudScale;
 
     ctx.save();
@@ -1568,7 +1707,7 @@ class CanvasRenderer {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
-    const startIdx = Math.floor(this.trimIn * (n - 1));
+    const startIdx = this.getTrackIndexAtProgress(this.trimIn);
 
     // 2B. Pre-Trim Completed Route (Segment from 0 to startIdx rendered as already ridden)
     if (startIdx > 0) {
@@ -1669,8 +1808,8 @@ class CanvasRenderer {
   // --- MODE 4: LOCATION SPOTLIGHT / ZOOM-IN ---
   renderModeSpotlight(progress) {
     const ctx = this.ctx;
-    const w = this.width;
-    const h = this.height;
+    const w = 1920;
+    const h = 1080;
     const s = this.hudScale;
 
     ctx.save();
@@ -1952,6 +2091,11 @@ class CanvasRenderer {
   drawStartFinishMarker(ctx, x, y, label, colorHex, isPulsing = false) {
     const s = this.hudScale;
     const style = this.startFinishStyle || this.markerStyle || 'dot';
+
+    // Pre-reserve collision area for start/finish so generic places never overlap it
+    if (this.collisionResolver) {
+      this.collisionResolver.place(x - 60 * s, y - 25 * s, 120 * s, 40 * s, 12 * s, 8 * s);
+    }
 
     ctx.save();
 
@@ -2422,7 +2566,7 @@ class CanvasRenderer {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
-    const startIdx = Math.floor(this.trimIn * (n - 1));
+    const startIdx = this.getTrackIndexAtProgress(this.trimIn);
 
     // 4B. Pre-Trim Completed Route (Segment from 0 to startIdx rendered as already ridden)
     if (startIdx > 0) {
@@ -2994,8 +3138,8 @@ class CanvasRenderer {
   // --- MAP FLYOVER (MODE 2) ---
   drawMapFlyover(riderIdx, interp, curMercX, curMercY, p0, p1) {
     const ctx = this.ctx;
-    const w = this.width;
-    const h = this.height;
+    const w = 1920;
+    const h = 1080;
     const s = this.hudScale;
 
     // Dynamic zoom evaluated from Zoom Ramp curve + user camera zoom slider
@@ -3071,7 +3215,7 @@ class CanvasRenderer {
     ctx.lineWidth = Math.max(2.5, this.lineWidth * 0.8 * s);
     ctx.stroke();
 
-    const startIdx = Math.floor(this.trimIn * (n - 1));
+    const startIdx = this.getTrackIndexAtProgress(this.trimIn);
 
     // 2B. Pre-Trim Completed Route (Segment from 0 to startIdx rendered as already ridden)
     if (startIdx > 0) {

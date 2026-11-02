@@ -1180,13 +1180,13 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadVectorLayers() {
     try {
       const pId = state.currentProjectId || 'default';
-      const resp = await fetch(`/api/vector-map/${pId}`);
+      const gpxParam = state.activeGpxName ? `?gpx_filename=${encodeURIComponent(state.activeGpxName)}` : '';
+      const resp = await fetch(`/api/vector-map/${pId}${gpxParam}`);
       const data = await resp.json();
       if (data.layers) {
         renderer.setVectorLayers(data.layers);
         if (typeof populateLayersDrawer === 'function') populateLayersDrawer();
         if (!state.isPlaying) renderer.render();
-        showToast('✓ Vektorové vrstvy mapy načteny');
       }
     } catch (err) {
       console.warn('Vector map loading failed:', err);
@@ -1663,6 +1663,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function selectGPX(filename) {
     try {
+      state.activeGpxName = filename;
       const resp = await fetch(`/api/gpx/${encodeURIComponent(filename)}`);
       const gpx = await resp.json();
 
@@ -1676,6 +1677,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       state.currentTime = renderer.trimIn * state.durationSec;
       updateTimeDisplay();
+      await loadVectorLayers();
       if (!state.isPlaying) renderer.render();
       showToast(`Načtena trasa: ${filename}`);
     } catch (err) {
@@ -2049,6 +2051,13 @@ document.addEventListener('DOMContentLoaded', () => {
           finishCityInput.value = renderer.finishCityName;
           state.currentTime = renderer.trimIn * state.durationSec;
           updateTimeDisplay();
+          state.activeGpxName = res.filename;
+          if (res.vector_layers) {
+            renderer.setVectorLayers(res.vector_layers);
+            if (typeof populateLayersDrawer === 'function') populateLayersDrawer();
+          } else {
+            await loadVectorLayers();
+          }
           if (!state.isPlaying) renderer.render();
 
           // Persist active_gpx in active SQLite project
@@ -2401,27 +2410,32 @@ document.addEventListener('DOMContentLoaded', () => {
     if (source === 'km') {
       let kmIn = parseFloat(trimInKmInput.value) || 0;
       let kmOut = parseFloat(trimOutKmInput.value) || totalDist;
-      if (kmIn >= kmOut) kmIn = Math.max(0, kmOut - 1.0);
-      trimInSlider.value = Math.round((kmIn / totalDist) * 100);
-      trimOutSlider.value = Math.round((kmOut / totalDist) * 100);
-    }
-
-    let tIn = parseInt(trimInSlider.value) / 100.0;
-    let tOut = parseInt(trimOutSlider.value) / 100.0;
-    if (tIn >= tOut) tIn = tOut - 0.05;
-    renderer.trimIn = tIn;
-    renderer.trimOut = tOut;
-    renderer.trimInKm = Number((tIn * totalDist).toFixed(1));
-    renderer.trimOutKm = Number((tOut * totalDist).toFixed(1));
-
-    if (source !== 'km') {
+      if (kmIn < 0) kmIn = 0;
+      if (kmOut > totalDist) kmOut = totalDist;
+      if (kmIn >= kmOut) kmIn = Math.max(0, kmOut - 0.5);
+      const tIn = totalDist > 0 ? (kmIn / totalDist) : 0;
+      const tOut = totalDist > 0 ? (kmOut / totalDist) : 1;
+      trimInSlider.value = Math.round(tIn * 100);
+      trimOutSlider.value = Math.round(tOut * 100);
+      renderer.trimIn = tIn;
+      renderer.trimOut = tOut;
+      renderer.trimInKm = Number(kmIn.toFixed(1));
+      renderer.trimOutKm = Number(kmOut.toFixed(1));
+    } else {
+      let tIn = parseInt(trimInSlider.value) / 100.0;
+      let tOut = parseInt(trimOutSlider.value) / 100.0;
+      if (tIn >= tOut) tIn = Math.max(0, tOut - 0.05);
+      renderer.trimIn = tIn;
+      renderer.trimOut = tOut;
+      renderer.trimInKm = Number((tIn * totalDist).toFixed(1));
+      renderer.trimOutKm = Number((tOut * totalDist).toFixed(1));
       if (trimInKmInput) trimInKmInput.value = renderer.trimInKm.toFixed(1);
       if (trimOutKmInput) trimOutKmInput.value = renderer.trimOutKm.toFixed(1);
     }
 
-    trimVal.textContent = `${Math.round(tIn * 100)}% (${renderer.trimInKm.toFixed(1)} km) — ${Math.round(tOut * 100)}% (${renderer.trimOutKm.toFixed(1)} km)`;
-    scrubberSegmentRange.style.left = `${tIn * 100}%`;
-    scrubberSegmentRange.style.width = `${(tOut - tIn) * 100}%`;
+    trimVal.textContent = `${Math.round(renderer.trimIn * 100)}% (${renderer.trimInKm.toFixed(1)} km) — ${Math.round(renderer.trimOut * 100)}% (${renderer.trimOutKm.toFixed(1)} km)`;
+    scrubberSegmentRange.style.left = `${renderer.trimIn * 100}%`;
+    scrubberSegmentRange.style.width = `${(renderer.trimOut - renderer.trimIn) * 100}%`;
   }
   trimInSlider.addEventListener('input', () => updateTrim('slider'));
   trimOutSlider.addEventListener('input', () => updateTrim('slider'));
@@ -3336,6 +3350,125 @@ document.addEventListener('DOMContentLoaded', () => {
   btnCloseExportModal.addEventListener('click', () => exportModal.style.display = 'none');
   btnCancelExport.addEventListener('click', () => exportModal.style.display = 'none');
 
+  // Pre-cache all required map tiles before offline frame rendering begins
+  async function precacheMapTiles(offRenderer, totalFrames, exportWidth, exportHeight, onProgress) {
+    if (!offRenderer.toggles.bgMap || offRenderer.mapStyle === 'vector') return;
+    if (!offRenderer.tileCache) offRenderer.tileCache = new Map();
+
+    const provider = offRenderer.tileProvider || 'mapy_outdoor';
+    const tilesToLoad = new Map();
+    const sampleSteps = Math.min(80, Math.max(20, totalFrames));
+    const viewportW = 1920;
+    const viewportH = 1080;
+
+    for (let s = 0; s <= sampleSteps; s++) {
+      const prog = s / sampleSteps;
+      const effProg = offRenderer.trimIn + prog * (offRenderer.trimOut - offRenderer.trimIn);
+      const interp = offRenderer.getTrackInterpolationAtProgress ? offRenderer.getTrackInterpolationAtProgress(effProg) : null;
+      if (!interp) continue;
+
+      let centerMx, centerMy, zoom;
+      if (offRenderer.animationMode === 'flyover') {
+        const tSpan = Math.max(0.0001, (offRenderer.trimOut - offRenderer.trimIn));
+        const clipProg = Math.max(0, Math.min(1, (effProg - offRenderer.trimIn) / tSpan));
+        const rampZoom = offRenderer.getZoomAtProgress ? offRenderer.getZoomAtProgress(clipProg) : 1.0;
+        const userZoom = (offRenderer.camZoom !== undefined && !isNaN(offRenderer.camZoom)) ? offRenderer.camZoom : 2.2;
+        zoom = Math.max(8.0, Math.min(17.5, (userZoom * rampZoom) + 6.8));
+        centerMx = interp.p0.merc_x + (interp.p1.merc_x - interp.p0.merc_x) * interp.interp;
+        centerMy = interp.p0.merc_y + (interp.p1.merc_y - interp.p0.merc_y) * interp.interp;
+      } else if (offRenderer.animationMode === 'split') {
+        const b = offRenderer.gpxData.bounds;
+        const spanX = (b.max_mx - b.min_mx) || 0.0005;
+        const spanY = (b.max_my - b.min_my) || 0.0005;
+        const zx = Math.log2((viewportW * 0.48) / (spanX * 256));
+        const zy = Math.log2((viewportH * 0.82) / (spanY * 256));
+        zoom = Math.max(6.0, Math.min(15.0, Math.min(zx, zy) * (offRenderer.viewportZoom || 1.0)));
+        centerMx = (b.min_mx + b.max_mx) / 2;
+        centerMy = (b.min_my + b.max_my) / 2;
+      } else {
+        const b = offRenderer.gpxData.bounds;
+        const spanX = (b.max_mx - b.min_mx) || 0.0005;
+        const spanY = (b.max_my - b.min_my) || 0.0005;
+        const zx = Math.log2((viewportW * 0.72) / (spanX * 256));
+        const zy = Math.log2((viewportH * 0.72) / (spanY * 256));
+        zoom = Math.max(6.0, Math.min(15.0, Math.min(zx, zy) * (offRenderer.viewportZoom || 1.0)));
+        centerMx = (b.min_mx + b.max_mx) / 2;
+        centerMy = (b.min_my + b.max_my) / 2;
+      }
+
+      const zClamped = Math.max(6, Math.min(18, zoom));
+      const zBase = Math.floor(zClamped);
+      const zNext = Math.min(18, zBase + 1);
+
+      const levels = [zBase];
+      if (zNext > zBase && (zClamped - zBase) > 0.05) levels.push(zNext);
+
+      for (const z of levels) {
+        const n = Math.pow(2, z);
+        const scaleFactor = Math.pow(2, zClamped - z);
+        const cX = centerMx * n * 256;
+        const cY = centerMy * n * 256;
+        const halfW = (viewportW / 2) / scaleFactor;
+        const halfH = (viewportH / 2) / scaleFactor;
+
+        const minX = Math.floor((cX - halfW) / 256) - 1;
+        const maxX = Math.floor((cX + halfW) / 256) + 1;
+        const minY = Math.floor((cY - halfH) / 256) - 1;
+        const maxY = Math.floor((cY + halfH) / 256) + 1;
+
+        for (let x = minX; x <= maxX; x++) {
+          for (let y = minY; y <= maxY; y++) {
+            if (x < 0 || x >= n || y < 0 || y >= n) continue;
+            const key = `${provider}_${z}_${x}_${y}`;
+            if (!offRenderer.tileCache.has(key) && !tilesToLoad.has(key)) {
+              tilesToLoad.set(key, { z, x, y, url: `/api/tiles/${provider}/${z}/${x}/${y}` });
+            }
+          }
+        }
+      }
+    }
+
+    const tileEntries = Array.from(tilesToLoad.values());
+    const total = tileEntries.length;
+    if (total === 0) return;
+
+    let loaded = 0;
+    const CONCURRENCY = 6;
+    let idx = 0;
+
+    async function loadWorker() {
+      while (idx < tileEntries.length) {
+        const item = tileEntries[idx++];
+        const key = `${provider}_${item.z}_${item.x}_${item.y}`;
+        await new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          const entry = { img, loaded: false };
+          offRenderer.tileCache.set(key, entry);
+          img.onload = () => {
+            entry.loaded = true;
+            loaded++;
+            if (typeof onProgress === 'function') onProgress(loaded, total);
+            resolve();
+          };
+          img.onerror = () => {
+            entry.error = true;
+            loaded++;
+            if (typeof onProgress === 'function') onProgress(loaded, total);
+            resolve();
+          };
+          img.src = item.url;
+        });
+      }
+    }
+
+    const workers = [];
+    for (let w = 0; w < Math.min(CONCURRENCY, total); w++) {
+      workers.push(loadWorker());
+    }
+    await Promise.all(workers);
+  }
+
   btnStartExport.addEventListener('click', async () => {
     btnStartExport.disabled = true;
     exportProgressContainer.style.display = 'block';
@@ -3404,9 +3537,10 @@ document.addEventListener('DOMContentLoaded', () => {
       offRenderer.trimIn = renderer.trimIn;
       offRenderer.trimOut = renderer.trimOut;
       offRenderer.colors = { ...renderer.colors };
-      offRenderer.hudScale = renderer.hudScale * (exportWidth / 1920);
-      offRenderer.lineWidth = renderer.lineWidth * (exportWidth / 1920);
-      offRenderer.dotSize = renderer.dotSize * (exportWidth / 1920);
+      offRenderer.canvasScaleFactor = exportWidth / 1920;
+      offRenderer.hudScale = renderer.hudScale;
+      offRenderer.lineWidth = renderer.lineWidth;
+      offRenderer.dotSize = renderer.dotSize;
       offRenderer.markerStyle = renderer.markerStyle;
       offRenderer.startCityName = renderer.startCityName;
       offRenderer.finishCityName = renderer.finishCityName;
@@ -3436,6 +3570,17 @@ document.addEventListener('DOMContentLoaded', () => {
       offRenderer.waypointOffsetSec = renderer.waypointOffsetSec;
       offRenderer.waypointDurationSec = renderer.waypointDurationSec;
 
+      // 2B. Pre-cache all required map tiles if background map is enabled
+      if (offRenderer.toggles.bgMap && offRenderer.mapStyle !== 'vector') {
+        exportProgressStatus.textContent = 'Fáze 1/3: Zjišťuji potřebné mapové podklady...';
+        await precacheMapTiles(offRenderer, totalExportFrames, exportWidth, exportHeight, (loaded, total) => {
+          const pct = Math.round((loaded / total) * 30);
+          exportProgressBarFill.style.width = `${pct}%`;
+          exportProgressPct.textContent = `${pct}%`;
+          exportProgressStatus.textContent = `Fáze 1/3: Stahuji mapové dlaždice (${loaded}/${total})...`;
+        });
+      }
+
       // 3. Fast binary frame upload pipeline with pipelining
       const uploadQueue = [];
       const MAX_CONCURRENT = 3;
@@ -3448,6 +3593,11 @@ document.addEventListener('DOMContentLoaded', () => {
           body: blob
         });
       }
+
+      const renderStartTime = performance.now();
+      let lastFpsTime = renderStartTime;
+      let lastFpsFrame = 0;
+      let currentFps = 0;
 
       for (let i = 0; i < totalExportFrames; i++) {
         while (clientExportStates[job_id] === 'paused') {
@@ -3484,16 +3634,26 @@ document.addEventListener('DOMContentLoaded', () => {
           await Promise.race(uploadQueue);
         }
 
-        const pct = Math.round(((i + 1) / totalExportFrames) * 75);
-        exportProgressBarFill.style.width = `${pct}%`;
-        exportProgressPct.textContent = `${pct}%`;
-        exportProgressStatus.textContent = `Generuji snímek ${i + 1}/${totalExportFrames}...`;
+        const now = performance.now();
+        if (now - lastFpsTime >= 500) {
+          currentFps = ((i - lastFpsFrame) / (now - lastFpsTime)) * 1000;
+          lastFpsTime = now;
+          lastFpsFrame = i;
+        }
+
+        const renderPct = 30 + Math.round(((i + 1) / totalExportFrames) * 55);
+        exportProgressBarFill.style.width = `${renderPct}%`;
+        exportProgressPct.textContent = `${renderPct}%`;
+        const fpsStr = currentFps > 0 ? ` • ${currentFps.toFixed(0)} FPS` : '';
+        exportProgressStatus.textContent = `Fáze 2/3: Generuji snímek ${i + 1}/${totalExportFrames} (${Math.round(((i + 1) / totalExportFrames) * 100)}%)${fpsStr}`;
       }
 
       await Promise.all(uploadQueue);
 
       // 4. Finalize encode
-      exportProgressStatus.textContent = `Kóduji ${chosenFormat.toUpperCase()} přes FFmpeg...`;
+      exportProgressStatus.textContent = `Fáze 3/3: Kóduji ${chosenFormat.toUpperCase()} přes FFmpeg...`;
+      exportProgressBarFill.style.width = '88%';
+      exportProgressPct.textContent = '88%';
       exportProgressBarFill.style.width = '85%';
       exportProgressPct.textContent = '85%';
 
