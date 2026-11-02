@@ -255,11 +255,14 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       `;
 
-      row.querySelector('.btn-select-proj').addEventListener('click', (e) => {
-        e.stopPropagation();
-        switchProject(p.id);
-        projectsModal.style.display = 'none';
-      });
+      const openBtn = row.querySelector ? row.querySelector('.btn-select-proj') : null;
+      if (openBtn) {
+        openBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          switchProject(p.id);
+          projectsModal.style.display = 'none';
+        });
+      }
 
       const delBtn = row.querySelector('.btn-del-proj');
       if (delBtn) {
@@ -1009,18 +1012,22 @@ document.addEventListener('DOMContentLoaded', () => {
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       renderer.setMapImage(img, metadata);
+      renderer.setBackdropImage(img, renderer.backdropOpacity || 0.65);
     };
     img.onerror = () => {
       const img2 = new Image();
       img2.crossOrigin = 'anonymous';
-      img2.onload = () => renderer.setMapImage(img2, metadata);
+      img2.onload = () => {
+        renderer.setMapImage(img2, metadata);
+        renderer.setBackdropImage(img2, renderer.backdropOpacity || 0.65);
+      };
       img2.src = `/assets/${encodeURIComponent(filename)}`;
     };
 
     if (customBlobUrl) {
       img.src = customBlobUrl;
     } else {
-      img.src = `/${encodeURIComponent(filename)}`;
+      img.src = `/assets/${encodeURIComponent(filename)}`;
     }
   }
 
@@ -1153,13 +1160,32 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==================== 8. VIEWPORT & CONTROLS ====================
-  animModeSelect.addEventListener('change', (e) => {
+  animModeSelect.addEventListener('change', async (e) => {
     renderer.animationMode = e.target.value;
     if (e.target.value === 'hud' && state.checkerboard) {
       canvasContainer.classList.add('checkerboard-bg');
     } else {
       canvasContainer.classList.remove('checkerboard-bg');
     }
+
+    // Reset camera state for fresh centering
+    renderer.camMercX = undefined;
+    renderer.camMercY = undefined;
+    renderer.camHeading = 0;
+
+    // Immediately persist to active SQLite project
+    if (state.currentProjectId) {
+      try {
+        await fetch(`/api/projects/${state.currentProjectId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ animation_mode: e.target.value })
+        });
+      } catch (err) {
+        console.warn('Failed to persist animation_mode:', err);
+      }
+    }
+
     showToast(`Režim animace: ${e.target.options[e.target.selectedIndex].text}`);
   });
 
@@ -1273,12 +1299,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
       const blobUrl = URL.createObjectURL(file);
       selectMap(name, blobUrl);
+      const img = new Image();
+      img.onload = () => {
+        renderer.setBackdropImage(img, renderer.backdropOpacity || 0.65);
+        renderer.setMapImage(img, null);
+      };
+      img.src = blobUrl;
       const formData = new FormData();
       formData.append('file', file);
       fetch('/api/upload', { method: 'POST', body: formData }).then(r => r.json()).then(res => {
         if (res.status === 'success') loadAssets(null, res.filename);
       });
-      showToast(`✓ Obrázek mapy načten: ${name}`);
+      showToast(`✓ Obrázek mapy / foto podklad načten: ${name}`);
       return;
     }
 
@@ -1350,6 +1382,8 @@ document.addEventListener('DOMContentLoaded', () => {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            animation_mode: renderer.animationMode,
+            map_style: renderer.mapStyle,
             settings: {
               colors: renderer.colors,
               hudScale: renderer.hudScale,
@@ -1627,6 +1661,8 @@ document.addEventListener('DOMContentLoaded', () => {
         img.onload = () => {
           renderer.backdropImage = img;
           renderer.backdropLoaded = true;
+          renderer.mapImage = img;
+          renderer.mapLoaded = true;
           if (btnClearBackdrop) btnClearBackdrop.style.display = 'inline-flex';
           showToast(`Foto podklad nahrán: ${file.name}`);
         };
@@ -1737,32 +1773,94 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   if (btnZoomInView) {
     btnZoomInView.addEventListener('click', () => {
-      renderer.viewportZoom = Math.min(4.0, (renderer.viewportZoom || 1.0) * 1.25);
-      if (viewportZoomSlider) viewportZoomSlider.value = renderer.viewportZoom.toFixed(2);
+      if (renderer.animationMode === 'flyover') {
+        renderer.camZoom = Math.min(5.0, (renderer.camZoom || 2.2) * 1.2);
+        camZoomSlider.value = renderer.camZoom.toFixed(1);
+        camZoomVal.textContent = `${renderer.camZoom.toFixed(1)}x`;
+        showToast(`Kamera zoom: ${renderer.camZoom.toFixed(1)}x`);
+      } else if (renderer.animationMode === 'spotlight') {
+        renderer.spotlight.zoomLevel = Math.min(18.0, (renderer.spotlight.zoomLevel || 14.0) + 0.8);
+        const sSlider = document.getElementById('spotlightZoomSlider');
+        const sVal = document.getElementById('spotlightZoomVal');
+        if (sSlider) sSlider.value = renderer.spotlight.zoomLevel.toFixed(1);
+        if (sVal) sVal.textContent = `${renderer.spotlight.zoomLevel.toFixed(1)}x`;
+        showToast(`Spotlight zoom: ${renderer.spotlight.zoomLevel.toFixed(1)}x`);
+      } else if (renderer.animationMode === 'hud') {
+        renderer.hudScale = Math.min(2.5, (renderer.hudScale || 1.0) * 1.15);
+        hudScaleSlider.value = renderer.hudScale.toFixed(2);
+        hudScaleVal.textContent = `${renderer.hudScale.toFixed(2)}x`;
+        showToast(`Měřítko HUD: ${renderer.hudScale.toFixed(2)}x`);
+      } else {
+        renderer.viewportZoom = Math.min(5.0, (renderer.viewportZoom || 1.0) * 1.25);
+        showToast(`Přiblížení trasy: ${(renderer.viewportZoom).toFixed(2)}x`);
+      }
+      saveCurrentProjectSettings();
     });
   }
   if (btnZoomOutView) {
     btnZoomOutView.addEventListener('click', () => {
-      renderer.viewportZoom = Math.max(0.2, (renderer.viewportZoom || 1.0) / 1.25);
-      if (viewportZoomSlider) viewportZoomSlider.value = renderer.viewportZoom.toFixed(2);
+      if (renderer.animationMode === 'flyover') {
+        renderer.camZoom = Math.max(1.0, (renderer.camZoom || 2.2) / 1.2);
+        camZoomSlider.value = renderer.camZoom.toFixed(1);
+        camZoomVal.textContent = `${renderer.camZoom.toFixed(1)}x`;
+        showToast(`Kamera zoom: ${renderer.camZoom.toFixed(1)}x`);
+      } else if (renderer.animationMode === 'spotlight') {
+        renderer.spotlight.zoomLevel = Math.max(7.0, (renderer.spotlight.zoomLevel || 14.0) - 0.8);
+        const sSlider = document.getElementById('spotlightZoomSlider');
+        const sVal = document.getElementById('spotlightZoomVal');
+        if (sSlider) sSlider.value = renderer.spotlight.zoomLevel.toFixed(1);
+        if (sVal) sVal.textContent = `${renderer.spotlight.zoomLevel.toFixed(1)}x`;
+        showToast(`Spotlight zoom: ${renderer.spotlight.zoomLevel.toFixed(1)}x`);
+      } else if (renderer.animationMode === 'hud') {
+        renderer.hudScale = Math.max(0.6, (renderer.hudScale || 1.0) / 1.15);
+        hudScaleSlider.value = renderer.hudScale.toFixed(2);
+        hudScaleVal.textContent = `${renderer.hudScale.toFixed(2)}x`;
+        showToast(`Měřítko HUD: ${renderer.hudScale.toFixed(2)}x`);
+      } else {
+        renderer.viewportZoom = Math.max(0.15, (renderer.viewportZoom || 1.0) / 1.25);
+        showToast(`Oddálení trasy: ${(renderer.viewportZoom).toFixed(2)}x`);
+      }
+      saveCurrentProjectSettings();
     });
   }
   if (btnResetViewportZoom) {
     btnResetViewportZoom.addEventListener('click', () => {
       renderer.viewportZoom = 1.0;
       renderer.viewportPan = { x: 0, y: 0 };
-      if (viewportZoomSlider) viewportZoomSlider.value = 1.0;
+      renderer.camZoom = 2.2;
+      camZoomSlider.value = '2.2';
+      camZoomVal.textContent = '2.2x';
+      renderer.spotlight.zoomLevel = 14.0;
+      const sSlider = document.getElementById('spotlightZoomSlider');
+      const sVal = document.getElementById('spotlightZoomVal');
+      if (sSlider) sSlider.value = '14.0';
+      if (sVal) sVal.textContent = '14.0x';
+      renderer.hudScale = 1.0;
+      hudScaleSlider.value = '1.0';
+      hudScaleVal.textContent = '1.00x';
       showToast('Pohled resetován na 100%');
+      saveCurrentProjectSettings();
     });
   }
   if (btnFitViewportRoute) {
     btnFitViewportRoute.addEventListener('click', () => {
       renderer.viewportZoom = 1.0;
       renderer.viewportPan = { x: 0, y: 0 };
-      if (viewportZoomSlider) viewportZoomSlider.value = 1.0;
       showToast('Trasa přizpůsobena do okna');
+      saveCurrentProjectSettings();
     });
   }
+
+  // Double-click to reset ANY range slider to its default value
+  document.querySelectorAll('input[type="range"]').forEach(slider => {
+    slider.addEventListener('dblclick', () => {
+      const def = slider.getAttribute('value') || slider.defaultValue || slider.getAttribute('min') || '0';
+      slider.value = def;
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      slider.dispatchEvent(new Event('change', { bubbles: true }));
+      showToast(`Hodnota posuvníku resetována na ${def}`);
+    });
+  });
 
   // Telemetry Configuration
   teleSlot1Type.addEventListener('change', (e) => renderer.telemetry.slot1.type = e.target.value);

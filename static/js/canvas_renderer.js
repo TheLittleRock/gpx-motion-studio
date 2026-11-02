@@ -228,6 +228,11 @@ class CanvasRenderer {
     this.camX = 0;
     this.camY = 0;
     this.camHeading = 0;
+    this.camMercX = undefined;
+    this.camMercY = undefined;
+    this._cachedSmoothedTrack = null;
+    this.viewportPan = { x: 0, y: 0 };
+    this.viewportZoom = 1.0;
 
     if (data.name) {
       if (data.name.includes(' do ')) {
@@ -538,7 +543,7 @@ class CanvasRenderer {
   }
 
   // --- DYNAMIC SLIPPY TILE ENGINE ---
-  drawSlippyMap(ctx, centerMercX, centerMercY, zoomFractional, viewportW, viewportH) {
+  drawSlippyMap(ctx, centerMercX, centerMercY, zoomFractional, viewportW, viewportH, offsetX = 0, offsetY = 0) {
     if (!this.tileCache) this.tileCache = new Map();
     const provider = this.tileProvider || 'mapy_outdoor';
     const z = Math.max(6, Math.min(18, Math.round(zoomFractional)));
@@ -571,8 +576,8 @@ class CanvasRenderer {
           img.src = `/api/tiles/${provider}/${z}/${x}/${y}`;
         }
 
-        const screenX = (x * 256 - centerX) * scaleFactor + viewportW / 2;
-        const screenY = (y * 256 - centerY) * scaleFactor + viewportH / 2;
+        const screenX = (x * 256 - centerX) * scaleFactor + viewportW / 2 + offsetX;
+        const screenY = (y * 256 - centerY) * scaleFactor + viewportH / 2 + offsetY;
         const screenW = Math.ceil(256 * scaleFactor) + 1;
         const screenH = Math.ceil(256 * scaleFactor) + 1;
 
@@ -741,14 +746,15 @@ class CanvasRenderer {
   // --- MODE 1: TELEMETRY HUD (ALPHA OVERLAY) ---
   renderModeHUD(idx0, interp, curMercX, curMercY, progress, dist, ele, grade) {
     const ctx = this.ctx;
-    // Optional Photo Backdrop
-    if (this.backdropImage && this.backdropLoaded) {
+    // Optional Photo Backdrop or Map Image
+    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : ((this.mapLoaded && this.mapImage) ? this.mapImage : null);
+    if (bgImg) {
       ctx.save();
       ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));
-      const scale = Math.max(this.width / this.backdropImage.width, this.height / this.backdropImage.height);
-      const drawW = this.backdropImage.width * scale;
-      const drawH = this.backdropImage.height * scale;
-      ctx.drawImage(this.backdropImage, (this.width - drawW) / 2, (this.height - drawH) / 2, drawW, drawH);
+      const scale = Math.max(this.width / bgImg.width, this.height / bgImg.height);
+      const drawW = bgImg.width * scale;
+      const drawH = bgImg.height * scale;
+      ctx.drawImage(bgImg, (this.width - drawW) / 2, (this.height - drawH) / 2, drawW, drawH);
       ctx.restore();
     }
 
@@ -796,34 +802,58 @@ class CanvasRenderer {
     ctx.save();
 
     const b = this.gpxData.bounds;
-    const spanX = (b.max_mx - b.min_mx) || 0.001;
-    const spanY = (b.max_my - b.min_my) || 0.001;
+    const spanX = (b.max_mx - b.min_mx) || 0.0005;
+    const spanY = (b.max_my - b.min_my) || 0.0005;
+    const centerMx = (b.min_mx + b.max_mx) / 2;
+    const centerMy = (b.min_my + b.max_my) / 2;
 
-    const marginX = w * 0.16;
-    const marginY = h * 0.16;
-    const usableW = w - marginX * 2;
-    const usableH = h - marginY * 2;
+    // Route bounds framing: both width and height fit nicely with 14% margins (usable 72%)
+    const usableW = w * 0.72;
+    const usableH = h * 0.72;
+    const zx = Math.log2(usableW / (spanX * 256));
+    const zy = Math.log2(usableH / (spanY * 256));
+    const fitZoom = Math.min(zx, zy);
+    const vZoom = Math.max(0.15, Math.min(5.0, this.viewportZoom || 1.0));
+    const currentZoom = Math.max(6, Math.min(18, fitZoom + Math.log2(vZoom)));
 
-    const vZoom = Math.max(0.2, Math.min(5.0, this.viewportZoom || 1.0));
-    const routeScale = Math.min(usableW / spanX, usableH / spanY) * vZoom;
-    const offsetX = marginX + (usableW - spanX * routeScale) / 2 + (this.viewportPan.x || 0);
-    const offsetY = marginY + (usableH - spanY * routeScale) / 2 + (this.viewportPan.y || 0);
+    const panX = (this.viewportPan && this.viewportPan.x) || 0;
+    const panY = (this.viewportPan && this.viewportPan.y) || 0;
 
-    const toScreen = (mx, my) => ({
-      x: offsetX + (mx - b.min_mx) * routeScale,
-      y: offsetY + (my - b.min_my) * routeScale
-    });
+    const toScreen = (mx, my) => {
+      const pt = this.mercToScreenTiles(mx, my, centerMx, centerMy, currentZoom, w, h);
+      return { x: pt.x + panX, y: pt.y + panY };
+    };
 
-    // 1. Background Map (Style A Tile Engine or Style B Vector)
+    // 0. Optional Backdrop Image (Drone photo / custom background)
+    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : ((this.mapLoaded && this.mapImage) ? this.mapImage : null);
+    if (bgImg) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));
+      const scale = Math.max(w / bgImg.width, h / bgImg.height);
+      const drawW = bgImg.width * scale;
+      const drawH = bgImg.height * scale;
+      ctx.drawImage(bgImg, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+      ctx.restore();
+    }
+
+    // 1. Background Map (Style A Tile Engine or Map Image or Style B Vector)
     if (this.toggles.bgMap) {
-      if (this.mapStyle === 'vector' && this.vectorLayers) {
-        this.drawLODLayers(ctx, toScreen);
+      if (this.mapStyle === 'vector') {
+        if (this.vectorLayers) {
+          this.drawLODLayers(ctx, toScreen);
+        }
       } else {
-        const centerMx = (b.min_mx + b.max_mx) / 2;
-        const centerMy = (b.min_my + b.max_my) / 2;
-        const baseZ = Math.log2((w * 0.65) / (spanX * 256));
-        const fitZoom = Math.max(7, Math.min(16, baseZ + Math.log2(vZoom)));
-        this.drawSlippyMap(ctx, centerMx, centerMy, fitZoom, w, h);
+        // Style A Mapy.com Slippy Tile Engine
+        this.drawSlippyMap(ctx, centerMx, centerMy, currentZoom, w, h, panX, panY);
+        // Fallback standalone map image if tiles not ready
+        if (this.mapLoaded && this.mapImage && (!this.tileCache || this.tileCache.size === 0)) {
+          ctx.save();
+          const scale = Math.max(w / this.mapImage.width, h / this.mapImage.height);
+          const drawW = this.mapImage.width * scale;
+          const drawH = this.mapImage.height * scale;
+          ctx.drawImage(this.mapImage, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+          ctx.restore();
+        }
         ctx.fillStyle = 'rgba(10, 14, 20, 0.35)';
         ctx.fillRect(0, 0, w, h);
       }
@@ -898,9 +928,10 @@ class CanvasRenderer {
           const wpIdx = Math.min(n - 1, Math.max(0, Math.floor((wp.dist_km / (points[n - 1].dist_km || 1)) * (n - 1))));
           const wpPt = toScreen(points[wpIdx].merc_x, points[wpIdx].merc_y);
           const pop = Math.min(1.0, (dist - (wp.dist_km - 2.0)) / 1.0);
-          this.drawWaypointCard(ctx, wpPt.x, wpPt.y, wp.title, wp.desc, s, pop);
+          this.drawWaypointCard(ctx, wpPt.x, wpPt.y, wp.title, wp.desc || wp.subtitle, s, pop);
         }
       }
+      this.drawActiveWaypointCallout(progress);
     }
 
     // 9. Moving Rider Beacon
@@ -941,17 +972,24 @@ class CanvasRenderer {
 
     const targetMerc = this.latLonToMercator(this.spotlight.targetLat, this.spotlight.targetLon);
 
+    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : ((this.mapLoaded && this.mapImage) ? this.mapImage : null);
+    if (bgImg) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));
+      const scale = Math.max(w / bgImg.width, h / bgImg.height);
+      const drawW = bgImg.width * scale;
+      const drawH = bgImg.height * scale;
+      ctx.drawImage(bgImg, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+      ctx.restore();
+    }
+
     if (this.toggles.bgMap) {
-      if (this.mapStyle === 'mapy') {
+      if (this.mapStyle === 'mapy' || this.mapStyle === 'panorama') {
         this.drawSlippyMap(ctx, targetMerc.x, targetMerc.y, currentZoom, w, h);
       } else {
-        ctx.fillStyle = '#0f1115';
-        ctx.fillRect(0, 0, w, h);
-        if (this.backdropLoaded && this.backdropImage) {
-          ctx.save();
-          ctx.globalAlpha = this.backdropOpacity;
-          ctx.drawImage(this.backdropImage, 0, 0, w, h);
-          ctx.restore();
+        if (!bgImg) {
+          ctx.fillStyle = '#0f1115';
+          ctx.fillRect(0, 0, w, h);
         }
       }
     }
@@ -1807,6 +1845,35 @@ class CanvasRenderer {
     ctx.restore();
   }
 
+  drawWaypointCard(ctx, x, y, title, desc, s, pop = 1.0) {
+    if (!title) return;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1.0, pop));
+    const cardW = 160 * s;
+    const cardH = 42 * s;
+    const cardX = x - cardW / 2;
+    const cardY = y - cardH - 12 * s;
+
+    ctx.fillStyle = this.colors.cardBg;
+    ctx.strokeStyle = this.colors.cardBorder;
+    ctx.lineWidth = 1.2 * s;
+    this.roundRect(ctx, cardX, cardY, cardW, cardH, 8 * s);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = this.colors.path;
+    ctx.font = `700 ${11 * s}px Inter, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(title, x, cardY + 17 * s);
+
+    if (desc) {
+      ctx.fillStyle = this.colors.textDim;
+      ctx.font = `500 ${9.5 * s}px Inter, sans-serif`;
+      ctx.fillText(desc, x, cardY + 32 * s);
+    }
+    ctx.restore();
+  }
+
   // --- MAP FLYOVER (MODE 2) ---
   drawMapFlyover(riderIdx, interp, curMercX, curMercY, p0, p1) {
     const ctx = this.ctx;
@@ -1814,9 +1881,10 @@ class CanvasRenderer {
     const h = this.height;
     const s = this.hudScale;
 
-    // Dynamic zoom evaluated from Zoom Ramp curve!
+    // Dynamic zoom evaluated from Zoom Ramp curve + user camera zoom slider
     const rampZoom = this.getZoomAtProgress(this.progress);
-    const tileZoom = Math.max(9, Math.min(18, 12.0 + rampZoom * 1.1));
+    const userCamZoom = (this.camZoom !== undefined && !isNaN(this.camZoom)) ? this.camZoom : 2.2;
+    const tileZoom = Math.max(8, Math.min(18, 10.0 + userCamZoom * 1.5 + (rampZoom - 2.2) * 1.2));
 
     if ((this.camMercX === undefined) || (this.camMercX === 0 && this.camMercY === 0) || isNaN(this.camMercX)) {
       this.camMercX = curMercX;
@@ -1840,13 +1908,33 @@ class CanvasRenderer {
       ctx.translate(-w / 2, -h / 2);
     }
 
+    // 0. Optional Backdrop Image (Drone photo / custom background)
+    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : ((this.mapLoaded && this.mapImage) ? this.mapImage : null);
+    if (bgImg) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));
+      const scale = Math.max(w / bgImg.width, h / bgImg.height);
+      const drawW = bgImg.width * scale;
+      const drawH = bgImg.height * scale;
+      ctx.drawImage(bgImg, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+      ctx.restore();
+    }
+
     // 1. Background Map: Slippy Tile Engine or Vector Map
     if (this.toggles.bgMap) {
-      if (this.mapStyle === 'vector' && this.vectorLayers) {
-        const toScreen = (mx, my) => this.mercToScreenTiles(mx, my, this.camMercX, this.camMercY, tileZoom, w, h);
-        this.drawLODLayers(ctx, toScreen);
+      if (this.mapStyle === 'vector') {
+        if (this.vectorLayers) {
+          const toScreen = (mx, my) => this.mercToScreenTiles(mx, my, this.camMercX, this.camMercY, tileZoom, w, h);
+          this.drawLODLayers(ctx, toScreen);
+        }
       } else {
         this.drawSlippyMap(ctx, this.camMercX, this.camMercY, tileZoom, w, h);
+        if (this.mapLoaded && this.mapImage && (!this.tileCache || this.tileCache.size === 0)) {
+          ctx.save();
+          const scale = Math.max(w / this.mapImage.width, h / this.mapImage.height);
+          ctx.drawImage(this.mapImage, (w - this.mapImage.width * scale) / 2, (h - this.mapImage.height * scale) / 2, this.mapImage.width * scale, this.mapImage.height * scale);
+          ctx.restore();
+        }
       }
     }
 
@@ -1887,6 +1975,17 @@ class CanvasRenderer {
     // 4. Rider Beacon
     if (this.toggles.riderDot) {
       this.drawPulsingRiderDot(ctx, tip.x, tip.y, s);
+    }
+
+    // 5. Landmarks along corridor
+    if (this.toggles.landmarks && this.landmarks) {
+      for (const lm of this.landmarks) {
+        const mxmy = this.latLonToMercator(lm.lat, lm.lon);
+        const lPt = this.mercToScreenTiles(mxmy.x, mxmy.y, this.camMercX, this.camMercY, tileZoom, w, h);
+        if (lPt.x >= -60 && lPt.x <= w + 60 && lPt.y >= -40 && lPt.y <= h + 40) {
+          this.drawLandmarkLabel(ctx, lPt.x, lPt.y, lm.name, lm.category, s);
+        }
+      }
     }
 
     ctx.restore();
