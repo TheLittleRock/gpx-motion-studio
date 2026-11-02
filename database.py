@@ -139,6 +139,27 @@ class ProjectDatabase:
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
             """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS export_jobs (
+                id TEXT PRIMARY KEY,
+                project_id TEXT,
+                name TEXT NOT NULL,
+                format TEXT NOT NULL,
+                resolution TEXT NOT NULL,
+                fps INTEGER NOT NULL,
+                duration_sec REAL NOT NULL,
+                status TEXT NOT NULL,
+                progress_pct INTEGER DEFAULT 0,
+                current_step TEXT,
+                file_path TEXT,
+                file_size_mb REAL DEFAULT 0,
+                download_url TEXT,
+                snapshot_url TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """)
             conn.commit()
 
         # Seed default project if database is empty
@@ -457,6 +478,81 @@ class ProjectDatabase:
                 (layer_id, project_id, bounds_key, layer_type, json.dumps(geojson_data), now)
             )
             conn.commit()
+
+    # ==================== EXPORT JOBS MANAGEMENT ====================
+    def create_export_job(self, job: dict):
+        now = datetime.utcnow().isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT OR REPLACE INTO export_jobs
+                   (id, project_id, name, format, resolution, fps, duration_sec, status, progress_pct, current_step, file_path, file_size_mb, download_url, snapshot_url, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job["id"],
+                    job.get("project_id", "default"),
+                    job.get("name", f"Export {job['id']}"),
+                    job.get("format", "mp4"),
+                    job.get("resolution", "1920x1080"),
+                    job.get("fps", 30),
+                    job.get("duration_sec", 10.0),
+                    job.get("status", "queued"),
+                    job.get("progress_pct", 0),
+                    job.get("current_step", "Čeká ve frontě..."),
+                    job.get("file_path", None),
+                    job.get("file_size_mb", 0.0),
+                    job.get("download_url", None),
+                    job.get("snapshot_url", None),
+                    now,
+                    now
+                )
+            )
+            conn.commit()
+            return self.get_export_job(job["id"])
+
+    def update_export_job(self, job_id: str, updates: dict):
+        now = datetime.utcnow().isoformat()
+        fields = []
+        values = []
+        for k, v in updates.items():
+            fields.append(f"{k} = ?")
+            values.append(v)
+        fields.append("updated_at = ?")
+        values.append(now)
+        values.append(job_id)
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE export_jobs SET {', '.join(fields)} WHERE id = ?", tuple(values))
+            conn.commit()
+            return self.get_export_job(job_id)
+
+    def get_export_job(self, job_id: str):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM export_jobs WHERE id = ?", (job_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def list_export_jobs(self, project_id: str = None):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if project_id:
+                cursor.execute("SELECT * FROM export_jobs WHERE project_id = ? ORDER BY created_at DESC", (project_id,))
+            else:
+                cursor.execute("SELECT * FROM export_jobs ORDER BY created_at DESC")
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    def rename_export_job(self, job_id: str, new_name: str):
+        return self.update_export_job(job_id, {"name": new_name.strip()})
+
+    def delete_export_job(self, job_id: str):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM export_jobs WHERE id = ?", (job_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
 if __name__ == "__main__":
     db = ProjectDatabase()

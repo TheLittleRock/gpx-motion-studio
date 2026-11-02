@@ -582,6 +582,28 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCopyFusionMacro = document.getElementById('btnCopyFusionMacro');
   const btnDownloadFusionSetting = document.getElementById('btnDownloadFusionSetting');
 
+  // Export Manager Elements
+  const btnOpenExportManagerModal = document.getElementById('btnOpenExportManagerModal');
+  const exportManagerModal = document.getElementById('exportManagerModal');
+  const btnCloseExportManagerModal = document.getElementById('btnCloseExportManagerModal');
+  const btnRefreshExports = document.getElementById('btnRefreshExports');
+  const btnNewExportFromManager = document.getElementById('btnNewExportFromManager');
+  const btnOpenManagerFromExport = document.getElementById('btnOpenManagerFromExport');
+  const exportBadge = document.getElementById('exportBadge');
+  const exportJobNameInput = document.getElementById('exportJobNameInput');
+  const btnOpenFusionFromExport = document.getElementById('btnOpenFusionFromExport');
+  const btnFilterExportsAll = document.getElementById('btnFilterExportsAll');
+  const btnFilterExportsRunning = document.getElementById('btnFilterExportsRunning');
+  const btnFilterExportsDone = document.getElementById('btnFilterExportsDone');
+  const exportManagerJobsList = document.getElementById('exportManagerJobsList');
+  const exportManagerEmpty = document.getElementById('exportManagerEmpty');
+  const countExportsAll = document.getElementById('countExportsAll');
+  const countExportsRunning = document.getElementById('countExportsRunning');
+  const countExportsDone = document.getElementById('countExportsDone');
+
+  // Active client-side export tracking states: { [job_id]: 'running' | 'paused' | 'cancelled' }
+  const clientExportStates = {};
+
   // ==================== 1. SQLITE PROJECT MANAGEMENT ====================
   async function loadProjects() {
     try {
@@ -779,6 +801,8 @@ document.addEventListener('DOMContentLoaded', () => {
           if (lodLakesOpacityVal) lodLakesOpacityVal.textContent = `${Math.round((renderer.lod.lakesOpacity || 0.5) * 100)}%`;
         }
         if (lodToggleRivers) lodToggleRivers.checked = renderer.lod.rivers;
+        const lodToggleRiverNames = document.getElementById('lodToggleRiverNames');
+        if (lodToggleRiverNames) lodToggleRiverNames.checked = renderer.lod.riverNames !== false;
         if (lodRiversWidthSlider) {
           lodRiversWidthSlider.value = renderer.lod.riversWidth || 3.0;
           if (lodRiversWidthVal) lodRiversWidthVal.textContent = `${(renderer.lod.riversWidth || 3.0).toFixed(1)}px`;
@@ -2506,6 +2530,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!state.isPlaying) renderer.render();
     });
   }
+  const lodToggleRiverNames = document.getElementById('lodToggleRiverNames');
+  if (lodToggleRiverNames) {
+    lodToggleRiverNames.addEventListener('change', (e) => {
+      renderer.lod.riverNames = e.target.checked;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
   if (lodRiverFilterRankSelect) {
     lodRiverFilterRankSelect.addEventListener('change', (e) => {
       renderer.lod.riverFilterRank = parseInt(e.target.value);
@@ -3287,11 +3319,19 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnQuickAddWp) btnQuickAddWp.addEventListener('click', openAddWaypointModal);
 
   // ==================== 12. DAVINCI RESOLVE EXPORT PIPELINE ====================
+  function canvasToBlob(canvas) {
+    return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  }
+
   btnOpenExportModal.addEventListener('click', () => {
     exportModal.style.display = 'flex';
     exportProgressContainer.style.display = 'none';
     exportResultBox.style.display = 'none';
     btnStartExport.disabled = false;
+    if (exportJobNameInput && (!exportJobNameInput.value || exportJobNameInput.value.startsWith('Export_'))) {
+      const baseName = state.activeGpxName ? state.activeGpxName.replace(/\.gpx$/i, '') : 'GPX_Motion';
+      exportJobNameInput.value = `${baseName}_${new Date().toISOString().slice(11, 19).replace(/:/g, '')}`;
+    }
   });
   btnCloseExportModal.addEventListener('click', () => exportModal.style.display = 'none');
   btnCancelExport.addEventListener('click', () => exportModal.style.display = 'none');
@@ -3305,25 +3345,52 @@ document.addEventListener('DOMContentLoaded', () => {
     const chosenRes = exportResSelect.value;
     const chosenFormat = exportFormatSelect.value;
     const withMotionBlur = exportMotionBlur ? exportMotionBlur.checked : false;
+    const isBackground = document.getElementById('exportBackgroundToggle')?.checked || false;
 
     const resParts = chosenRes.split('x');
     const exportWidth = parseInt(resParts[0]);
     const exportHeight = parseInt(resParts[1]);
-
     const totalExportFrames = Math.round(state.durationSec * chosenFps);
-    exportProgressStatus.textContent = 'Inicializuji renderování...';
+
+    const baseName = state.activeGpxName ? state.activeGpxName.replace(/\.gpx$/i, '') : 'Trasa';
+    const jobName = exportJobNameInput?.value?.trim() || `${baseName}_${chosenFormat.toUpperCase()}_${new Date().toISOString().slice(11, 19).replace(/:/g, '')}`;
+
+    exportProgressStatus.textContent = 'Registruji exportní úlohu...';
     exportProgressBarFill.style.width = '0%';
+    exportProgressPct.textContent = '0%';
 
     try {
-      const initResp = await fetch('/api/export/start', { method: 'POST' });
-      const { job_id } = await initResp.json();
+      // 1. Create Job in SQLite
+      const createResp = await fetch('/api/exports/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: state.currentProjectId || 'default',
+          name: jobName,
+          format: chosenFormat,
+          resolution: chosenRes,
+          fps: chosenFps,
+          duration_sec: state.durationSec
+        })
+      });
+      const createData = await createResp.json();
+      const job = createData.job;
+      const job_id = job.id;
 
+      clientExportStates[job_id] = 'running';
+      if (typeof loadExportJobs === 'function') loadExportJobs();
+
+      if (isBackground) {
+        exportModal.style.display = 'none';
+        showToast(`🚀 Export "${jobName}" běží na pozadí`);
+      }
+
+      // 2. Prepare offscreen canvas & clone renderer
       const offscreen = document.createElement('canvas');
       offscreen.width = exportWidth;
       offscreen.height = exportHeight;
       const offRenderer = new CanvasRenderer(offscreen);
 
-      // Clone full renderer state
       offRenderer.setResolution(exportWidth, exportHeight);
       offRenderer.animationMode = renderer.animationMode;
       offRenderer.mapStyle = renderer.mapStyle;
@@ -3369,10 +3436,33 @@ document.addEventListener('DOMContentLoaded', () => {
       offRenderer.waypointOffsetSec = renderer.waypointOffsetSec;
       offRenderer.waypointDurationSec = renderer.waypointDurationSec;
 
-      const batchSize = 10;
-      let frameBatch = [];
+      // 3. Fast binary frame upload pipeline with pipelining
+      const uploadQueue = [];
+      const MAX_CONCURRENT = 3;
+
+      async function uploadFrameBinary(blob, frameIndex) {
+        const url = `/api/export/upload-frame-binary?job_id=${encodeURIComponent(job_id)}&frame_index=${frameIndex}`;
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'image/png' },
+          body: blob
+        });
+      }
 
       for (let i = 0; i < totalExportFrames; i++) {
+        while (clientExportStates[job_id] === 'paused') {
+          exportProgressStatus.textContent = `Pozastaveno na snímku ${i}/${totalExportFrames}`;
+          await new Promise(r => setTimeout(r, 400));
+        }
+
+        if (clientExportStates[job_id] === 'cancelled') {
+          exportProgressStatus.textContent = 'Export zrušen.';
+          btnStartExport.disabled = false;
+          showToast('Export byl zrušen');
+          if (typeof loadExportJobs === 'function') loadExportJobs();
+          return;
+        }
+
         const norm = i / (totalExportFrames - 1 || 1);
         if (state.trimMode === 'fit') {
           offRenderer.currentTime = norm * state.durationSec;
@@ -3382,30 +3472,32 @@ document.addEventListener('DOMContentLoaded', () => {
         offRenderer.progress = offRenderer.trimIn + norm * (offRenderer.trimOut - offRenderer.trimIn);
         offRenderer.render(1.0 / chosenFps);
 
-        const dataUrl = offscreen.toDataURL('image/png');
-        frameBatch.push({ index: i, data: dataUrl });
+        const blob = await canvasToBlob(offscreen);
 
-        if (frameBatch.length >= batchSize || i === totalExportFrames - 1) {
-          await fetch('/api/export/upload-frames', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_id, frames: frameBatch })
-          });
-          frameBatch = [];
+        const uploadPromise = uploadFrameBinary(blob, i).then(() => {
+          const idx = uploadQueue.indexOf(uploadPromise);
+          if (idx !== -1) uploadQueue.splice(idx, 1);
+        });
+        uploadQueue.push(uploadPromise);
+
+        if (uploadQueue.length >= MAX_CONCURRENT) {
+          await Promise.race(uploadQueue);
         }
 
-        const pct = Math.round(((i + 1) / totalExportFrames) * 80);
+        const pct = Math.round(((i + 1) / totalExportFrames) * 75);
         exportProgressBarFill.style.width = `${pct}%`;
         exportProgressPct.textContent = `${pct}%`;
         exportProgressStatus.textContent = `Generuji snímek ${i + 1}/${totalExportFrames}...`;
       }
 
-      const isBackground = document.getElementById('exportBackgroundToggle')?.checked || false;
+      await Promise.all(uploadQueue);
 
+      // 4. Finalize encode
       exportProgressStatus.textContent = `Kóduji ${chosenFormat.toUpperCase()} přes FFmpeg...`;
-      exportProgressBarFill.style.width = '88%';
+      exportProgressBarFill.style.width = '85%';
+      exportProgressPct.textContent = '85%';
 
-      const snapshotData = captureCurrentState('Exportované video: ' + chosenFormat);
+      const snapshotData = captureCurrentState('Export: ' + jobName);
 
       const finalizeResp = await fetch('/api/export/finalize', {
         method: 'POST',
@@ -3423,11 +3515,11 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       const result = await finalizeResp.json();
+      delete clientExportStates[job_id];
+      if (typeof loadExportJobs === 'function') loadExportJobs();
 
       if (isBackground) {
-        exportModal.style.display = 'none';
-        showToast(`🚀 Export ${chosenFormat.toUpperCase()} běží na pozadí`);
-        startBackgroundExportPolling(job_id, chosenFormat, result.snapshot_url);
+        showToast(`✓ Export "${jobName}" dokončen!`);
         return;
       }
 
@@ -3440,7 +3532,7 @@ document.addEventListener('DOMContentLoaded', () => {
         exportResultDetails.innerHTML = `
           <strong>Soubor:</strong> ${result.filename}<br>
           <strong>Velikost:</strong> ${result.size_mb} MB (${totalExportFrames} snímků @ ${chosenFps} fps)<br>
-          <strong>Cesta k souboru:</strong> <code style="color:var(--accent-cyan);">${result.file_path || result.download_url}</code>
+          <strong>Cesta:</strong> <code style="color:var(--accent-cyan);">${result.file_path || result.download_url}</code>
         `;
         btnDownloadExport.href = result.download_url;
         btnDownloadExport.download = result.filename;
@@ -3451,68 +3543,340 @@ document.addEventListener('DOMContentLoaded', () => {
           btnDownloadExportSnapshot.download = `project_snapshot_${job_id}.json`;
           btnDownloadExportSnapshot.style.display = 'inline-flex';
         }
-
         btnCopyExportPath.onclick = () => {
           navigator.clipboard.writeText(result.file_path || result.download_url);
-          btnCopyExportPath.textContent = '✓ Zkopírováno!';
-          setTimeout(() => btnCopyExportPath.textContent = '📋 Zkopírovat cestu k souboru', 2000);
+          showToast('✓ Cesta k souboru zkopírována do schránky');
         };
+        showToast(`✓ Video "${result.filename}" úspěšně vyrenderováno!`);
+      } else {
+        exportProgressStatus.textContent = 'Chyba kódování: ' + (result.error || 'Neznámá chyba');
+        showToast('Chyba při exportu videa', true);
       }
     } catch (err) {
-      alert('Chyba exportu: ' + err.message);
+      console.error('Export error:', err);
+      exportProgressStatus.textContent = 'Chyba renderování: ' + err.message;
+      showToast('Chyba při exportu: ' + err.message, true);
     } finally {
       btnStartExport.disabled = false;
+      if (typeof loadExportJobs === 'function') loadExportJobs();
     }
   });
 
-  const bgExportIndicator = document.getElementById('bgExportIndicator');
-  const btnDownloadExportSnapshot = document.getElementById('btnDownloadExportSnapshot');
+  // ==================== 12B. EXPORT MANAGER (SPRÁVCE EXPORTŮ) ====================
+  let exportManagerFilter = 'all'; // 'all' | 'running' | 'done'
+  let exportPollingTimer = null;
 
-  function startBackgroundExportPolling(jobId, format, snapshotUrl) {
-    if (!bgExportIndicator) return;
-    bgExportIndicator.style.display = 'inline-flex';
-    bgExportIndicator.textContent = `⏳ Exportuji ${format.toUpperCase()}...`;
-    bgExportIndicator.onclick = () => {
-      exportModal.style.display = 'flex';
-    };
+  function initExportManager() {
+    if (btnOpenExportManagerModal) {
+      btnOpenExportManagerModal.addEventListener('click', () => {
+        exportManagerModal.style.display = 'flex';
+        loadExportJobs();
+        startExportManagerPolling();
+      });
+    }
 
-    const pollInterval = setInterval(async () => {
-      try {
-        const resp = await fetch(`/api/export/status/${jobId}`);
-        const data = await resp.json();
-        if (data.status === 'complete') {
-          clearInterval(pollInterval);
-          bgExportIndicator.textContent = `✓ Export hotov (${data.size_mb} MB)`;
-          bgExportIndicator.style.background = 'rgba(16, 185, 129, 0.35)';
-          bgExportIndicator.onclick = () => {
-            window.location.href = data.download_url;
-          };
-          showToast(`✓ Video úspěšně exportováno (${data.size_mb} MB)!`);
+    if (btnCloseExportManagerModal) {
+      btnCloseExportManagerModal.addEventListener('click', () => {
+        exportManagerModal.style.display = 'none';
+      });
+    }
 
-          if (btnDownloadExport) {
-            btnDownloadExport.href = data.download_url;
-            btnDownloadExport.download = data.filename;
-            btnDownloadExport.style.display = 'inline-flex';
-          }
-          if (btnDownloadExportSnapshot && (snapshotUrl || data.snapshot_url)) {
-            btnDownloadExportSnapshot.href = snapshotUrl || data.snapshot_url;
-            btnDownloadExportSnapshot.download = `project_snapshot_${jobId}.json`;
-            btnDownloadExportSnapshot.style.display = 'inline-flex';
-          }
-        } else if (data.status === 'error') {
-          clearInterval(pollInterval);
-          bgExportIndicator.textContent = '❌ Chyba exportu';
-          bgExportIndicator.style.background = 'rgba(239, 68, 68, 0.35)';
-          showToast('Chyba při exportu: ' + (data.error || 'Neznámá chyba'), true);
-        }
-      } catch (e) {
-        console.warn('Polling error:', e);
-      }
-    }, 1200);
+    if (exportManagerModal) {
+      exportManagerModal.addEventListener('click', (e) => {
+        if (e.target === exportManagerModal) exportManagerModal.style.display = 'none';
+      });
+    }
+
+    if (btnRefreshExports) {
+      btnRefreshExports.addEventListener('click', () => loadExportJobs());
+    }
+
+    if (btnNewExportFromManager) {
+      btnNewExportFromManager.addEventListener('click', () => {
+        exportManagerModal.style.display = 'none';
+        exportModal.style.display = 'flex';
+      });
+    }
+
+    if (btnOpenManagerFromExport) {
+      btnOpenManagerFromExport.addEventListener('click', () => {
+        exportModal.style.display = 'none';
+        exportManagerModal.style.display = 'flex';
+        loadExportJobs();
+        startExportManagerPolling();
+      });
+    }
+
+    if (bgExportIndicator) {
+      bgExportIndicator.addEventListener('click', () => {
+        exportManagerModal.style.display = 'flex';
+        loadExportJobs();
+        startExportManagerPolling();
+      });
+    }
+
+    if (btnFilterExportsAll) {
+      btnFilterExportsAll.addEventListener('click', () => {
+        exportManagerFilter = 'all';
+        updateFilterTabsUI();
+        loadExportJobs();
+      });
+    }
+    if (btnFilterExportsRunning) {
+      btnFilterExportsRunning.addEventListener('click', () => {
+        exportManagerFilter = 'running';
+        updateFilterTabsUI();
+        loadExportJobs();
+      });
+    }
+    if (btnFilterExportsDone) {
+      btnFilterExportsDone.addEventListener('click', () => {
+        exportManagerFilter = 'done';
+        updateFilterTabsUI();
+        loadExportJobs();
+      });
+    }
+
+    loadExportJobs();
+    startExportManagerPolling();
   }
 
-  // ==================== 13. FUSION MACRO EXPORT ====================
-  btnOpenFusionModal.addEventListener('click', async () => {
+  function updateFilterTabsUI() {
+    if (btnFilterExportsAll) btnFilterExportsAll.classList.toggle('active', exportManagerFilter === 'all');
+    if (btnFilterExportsRunning) btnFilterExportsRunning.classList.toggle('active', exportManagerFilter === 'running');
+    if (btnFilterExportsDone) btnFilterExportsDone.classList.toggle('active', exportManagerFilter === 'done');
+  }
+
+  function startExportManagerPolling() {
+    if (exportPollingTimer) return;
+    exportPollingTimer = setInterval(async () => {
+      const hasActive = Object.values(clientExportStates).some(s => s === 'running' || s === 'paused');
+      const isOpen = exportManagerModal && exportManagerModal.style.display === 'flex';
+      if (hasActive || isOpen) {
+        await loadExportJobs();
+      }
+    }, 1500);
+  }
+
+  async function loadExportJobs() {
+    try {
+      const resp = await fetch('/api/exports');
+      const data = await resp.json();
+      const jobs = data.jobs || [];
+
+      const activeRunning = jobs.filter(j => j.status === 'rendering' || j.status === 'encoding' || j.status === 'queued' || j.status === 'paused');
+      const completedJobs = jobs.filter(j => j.status === 'completed');
+
+      if (exportBadge) {
+        if (activeRunning.length > 0) {
+          exportBadge.style.display = 'inline-block';
+          exportBadge.textContent = activeRunning.length;
+        } else {
+          exportBadge.style.display = 'none';
+        }
+      }
+
+      if (bgExportIndicator) {
+        if (activeRunning.length > 0) {
+          bgExportIndicator.style.display = 'inline-flex';
+          const topJob = activeRunning[0];
+          bgExportIndicator.textContent = `⏳ ${topJob.name}: ${topJob.progress_pct}%`;
+        } else {
+          bgExportIndicator.style.display = 'none';
+        }
+      }
+
+      if (countExportsAll) countExportsAll.textContent = jobs.length;
+      if (countExportsRunning) countExportsRunning.textContent = activeRunning.length;
+      if (countExportsDone) countExportsDone.textContent = completedJobs.length;
+
+      let displayedJobs = jobs;
+      if (exportManagerFilter === 'running') {
+        displayedJobs = activeRunning;
+      } else if (exportManagerFilter === 'done') {
+        displayedJobs = completedJobs;
+      }
+
+      renderExportJobCards(displayedJobs);
+    } catch (err) {
+      console.warn('Failed to load exports:', err);
+    }
+  }
+
+  function renderExportJobCards(jobs) {
+    if (!exportManagerJobsList) return;
+    if (jobs.length === 0) {
+      exportManagerJobsList.innerHTML = '';
+      if (exportManagerEmpty) exportManagerEmpty.style.display = 'block';
+      return;
+    }
+
+    if (exportManagerEmpty) exportManagerEmpty.style.display = 'none';
+    exportManagerJobsList.innerHTML = '';
+
+    for (const job of jobs) {
+      const card = document.createElement('div');
+      card.className = `export-job-card ${job.status}`;
+      card.id = `job_card_${job.id}`;
+
+      let statusPillHtml = '';
+      if (job.status === 'rendering' || job.status === 'encoding' || job.status === 'queued') {
+        statusPillHtml = `<span class="export-status-pill status-running">⏳ ${job.current_step || 'Renderuji...'}</span>`;
+      } else if (job.status === 'paused') {
+        statusPillHtml = `<span class="export-status-pill status-paused">⏸️ Pozastaveno (${job.progress_pct}%)</span>`;
+      } else if (job.status === 'completed') {
+        statusPillHtml = `<span class="export-status-pill status-completed">✓ Dokončeno (${job.file_size_mb || 0} MB)</span>`;
+      } else if (job.status === 'cancelled') {
+        statusPillHtml = `<span class="export-status-pill status-failed">⏹ Zrušeno</span>`;
+      } else {
+        statusPillHtml = `<span class="export-status-pill status-failed">❌ Chyba</span>`;
+      }
+
+      const fmt = (job.format || 'mp4').toLowerCase();
+      let fmtBadgeClass = 'export-badge-mp4';
+      let fmtLabel = 'MP4';
+      if (fmt.includes('prores')) { fmtBadgeClass = 'export-badge-prores'; fmtLabel = 'ProRes 4444'; }
+      else if (fmt.includes('webm')) { fmtBadgeClass = 'export-badge-webm'; fmtLabel = 'WebM VP9'; }
+      else if (fmt.includes('png')) { fmtBadgeClass = 'export-badge-png'; fmtLabel = 'PNG Seq'; }
+
+      let progressHtml = '';
+      if (job.status === 'rendering' || job.status === 'encoding' || job.status === 'paused' || job.status === 'queued') {
+        progressHtml = `
+          <div class="export-job-progress">
+            <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted);">
+              <span>${job.current_step || 'Zpracovávám...'}</span>
+              <strong style="color:#fff;">${job.progress_pct || 0}%</strong>
+            </div>
+            <div class="export-job-progress-bar">
+              <div class="export-job-progress-fill" style="width:${job.progress_pct || 0}%;"></div>
+            </div>
+          </div>
+        `;
+      }
+
+      let actionsHtml = '';
+      if (job.status === 'rendering' || job.status === 'queued') {
+        actionsHtml = `
+          <button class="tool-btn btn-job-pause" data-id="${job.id}" style="font-size:11px; padding:3px 8px;">⏸️ Pozastavit</button>
+          <button class="tool-btn btn-job-cancel" data-id="${job.id}" style="font-size:11px; padding:3px 8px; color:#ef4444;">❌ Zrušit</button>
+        `;
+      } else if (job.status === 'paused') {
+        actionsHtml = `
+          <button class="tool-btn btn-job-resume" data-id="${job.id}" style="font-size:11px; padding:3px 8px; color:var(--accent-cyan);">▶️ Pokračovat</button>
+          <button class="tool-btn btn-job-cancel" data-id="${job.id}" style="font-size:11px; padding:3px 8px; color:#ef4444;">❌ Zrušit</button>
+        `;
+      } else if (job.status === 'completed') {
+        actionsHtml = `
+          <a href="${job.download_url}" download class="btn btn-primary" style="font-size:11px; padding:3px 10px; text-decoration:none;">⬇️ Stáhnout video</a>
+          ${job.snapshot_url ? `<a href="${job.snapshot_url}" download class="btn btn-secondary" style="font-size:11px; padding:3px 10px; text-decoration:none;" title="Stáhnout recept scény .json">📄 Recept</a>` : ''}
+          <button class="tool-btn btn-job-rename" data-id="${job.id}" data-name="${job.name}" style="font-size:11px; padding:3px 8px;" title="Přejmenovat export">✏️</button>
+          <button class="tool-btn btn-job-delete" data-id="${job.id}" style="font-size:11px; padding:3px 8px; color:var(--text-muted);" title="Smazat soubor a záznam">🗑️</button>
+        `;
+      } else {
+        actionsHtml = `
+          <button class="tool-btn btn-job-delete" data-id="${job.id}" style="font-size:11px; padding:3px 8px; color:var(--text-muted);" title="Smazat záznam">🗑️ Smazat</button>
+        `;
+      }
+
+      card.innerHTML = `
+        <div class="export-job-header">
+          <div class="export-job-title-row">
+            <span class="export-job-badge ${fmtBadgeClass}">${fmtLabel}</span>
+            <span class="export-job-title" title="${job.name}">${job.name}</span>
+          </div>
+          <div>${statusPillHtml}</div>
+        </div>
+        <div class="export-job-meta">
+          <span>📐 ${job.resolution || '1080p'}</span>
+          <span>⚡ ${job.fps || 30} FPS</span>
+          <span>⏱️ ${(job.duration_sec || 0).toFixed(1)}s</span>
+          <span style="color:var(--text-dim);">${job.created_at ? job.created_at.slice(0, 19).replace('T', ' ') : ''}</span>
+        </div>
+        ${progressHtml}
+        <div class="export-job-actions">
+          ${actionsHtml}
+        </div>
+      `;
+
+      exportManagerJobsList.appendChild(card);
+    }
+
+    exportManagerJobsList.querySelectorAll('.btn-job-pause').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        clientExportStates[id] = 'paused';
+        await fetch(`/api/exports/${id}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'pause' })
+        });
+        loadExportJobs();
+        showToast('⏸️ Export pozastaven');
+      });
+    });
+
+    exportManagerJobsList.querySelectorAll('.btn-job-resume').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        clientExportStates[id] = 'running';
+        await fetch(`/api/exports/${id}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'resume' })
+        });
+        loadExportJobs();
+        showToast('▶️ Export pokračuje');
+      });
+    });
+
+    exportManagerJobsList.querySelectorAll('.btn-job-cancel').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        if (!confirm('Opravdu chcete zrušit tento export?')) return;
+        clientExportStates[id] = 'cancelled';
+        await fetch(`/api/exports/${id}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cancel' })
+        });
+        loadExportJobs();
+        showToast('⏹ Export zrušen');
+      });
+    });
+
+    exportManagerJobsList.querySelectorAll('.btn-job-rename').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        const oldName = e.currentTarget.getAttribute('data-name');
+        const newName = prompt('Zadejte nový název exportu:', oldName);
+        if (newName && newName.trim() && newName.trim() !== oldName) {
+          await fetch(`/api/exports/${id}/rename`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName.trim() })
+          });
+          loadExportJobs();
+          showToast('✓ Export přejmenován');
+        }
+      });
+    });
+
+    exportManagerJobsList.querySelectorAll('.btn-job-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const id = e.currentTarget.getAttribute('data-id');
+        if (!confirm('Opravdu smazat tento export ze serveru?')) return;
+        await fetch(`/api/exports/${id}`, { method: 'DELETE' });
+        loadExportJobs();
+        showToast('🗑️ Export smazán');
+      });
+    });
+  }
+
+  // Initialize Export Manager
+  initExportManager();
+
+  // ==================== 13. FUSION MACRO EXPORT (WITH CLOSE FIXES) ====================
+  function openFusionModalHandler() {
     fusionModal.style.display = 'flex';
     fusionCodeBox.textContent = 'Generuji nativní DaVinci Resolve Fusion makro...';
 
@@ -3521,24 +3885,23 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    try {
-      const resp = await fetch('/api/export/fusion', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          points: renderer.gpxData.simplified_points,
-          fps: state.fps,
-          duration: state.durationSec,
-          resolution: resSelect.value,
-          color: renderer.colors.path,
-          brush_size: 0.007 * renderer.hudScale,
-          glow_intensity: renderer.colors.glowIntensity * 0.25,
-          track_name: renderer.gpxData.name || 'Rekola_Trasa',
-          motion_blur: exportMotionBlur ? exportMotionBlur.checked : false
-        })
-      });
-
-      const data = await resp.json();
+    fetch('/api/export/fusion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        points: renderer.gpxData.simplified_points,
+        fps: state.fps,
+        duration: state.durationSec,
+        resolution: resSelect.value,
+        color: renderer.colors.path,
+        brush_size: 0.007 * renderer.hudScale,
+        glow_intensity: renderer.colors.glowIntensity * 0.25,
+        track_name: renderer.gpxData.name || 'Rekola_Trasa',
+        motion_blur: exportMotionBlur ? exportMotionBlur.checked : false
+      })
+    })
+    .then(r => r.json())
+    .then(data => {
       fusionCodeBox.textContent = data.setting_content;
 
       btnCopyFusionMacro.onclick = () => {
@@ -3556,8 +3919,31 @@ document.addEventListener('DOMContentLoaded', () => {
         a.click();
         URL.revokeObjectURL(url);
       };
-    } catch (err) {
+    })
+    .catch(err => {
       fusionCodeBox.textContent = 'Chyba při generování makra: ' + err.message;
+    });
+  }
+
+  if (btnOpenFusionModal) btnOpenFusionModal.addEventListener('click', openFusionModalHandler);
+  if (btnOpenFusionFromExport) btnOpenFusionFromExport.addEventListener('click', openFusionModalHandler);
+  if (btnCloseFusionModal) {
+    btnCloseFusionModal.addEventListener('click', () => {
+      fusionModal.style.display = 'none';
+    });
+  }
+  if (fusionModal) {
+    fusionModal.addEventListener('click', (e) => {
+      if (e.target === fusionModal) fusionModal.style.display = 'none';
+    });
+  }
+
+  // Close modals on Escape key
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (fusionModal && fusionModal.style.display === 'flex') fusionModal.style.display = 'none';
+      if (exportManagerModal && exportManagerModal.style.display === 'flex') exportManagerModal.style.display = 'none';
+      if (exportModal && exportModal.style.display === 'flex') exportModal.style.display = 'none';
     }
   });
   // ==================== 13. ZOOM RAMP BEZIER GRAPH ====================

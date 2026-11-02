@@ -341,19 +341,20 @@ def auto_detect_landmarks(gpx_points):
     detected.sort(key=lambda x: x.get("progress", 0))
     return detected
 
-def deduplicate_points(places, landmarks, threshold_km=6.0):
+def deduplicate_points(places, landmarks, threshold_km=9.5):
     """
-    Prevents duplicate points/labels within threshold_km.
+    Prevents duplicate or densely clustered points/labels along the corridor.
     1. If a landmark is within threshold_km of a settlement, landmark takes precedence.
     2. If two settlements are close to each other, higher-ranked settlement takes precedence.
     """
     sorted_places = sorted(places, key=lambda p: (p.get("rank", 99), p.get("name", "")))
     filtered_places = []
     for pl in sorted_places:
-        near_lm = any(math.hypot((pl["lat"] - lm["lat"]) * 111.0, (pl["lon"] - lm["lon"]) * 71.0) < threshold_km for lm in landmarks)
+        thresh = threshold_km if pl.get("rank", 99) >= 3 else 5.5
+        near_lm = any(math.hypot((pl["lat"] - lm["lat"]) * 111.0, (pl["lon"] - lm["lon"]) * 71.0) < thresh for lm in landmarks)
         if near_lm:
             continue
-        near_other = any(math.hypot((pl["lat"] - other["lat"]) * 111.0, (pl["lon"] - other["lon"]) * 71.0) < threshold_km for other in filtered_places)
+        near_other = any(math.hypot((pl["lat"] - other["lat"]) * 111.0, (pl["lon"] - other["lon"]) * 71.0) < thresh for other in filtered_places)
         if not near_other:
             filtered_places.append(pl)
     return filtered_places

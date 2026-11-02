@@ -56,11 +56,11 @@
     </div>
 
     <div class="header-actions">
-      <div id="bgExportIndicator" class="tool-btn" style="display:none; background:rgba(16, 185, 129, 0.15); border-color:#10b981; color:#10b981; font-weight:700; font-size:11px; cursor:pointer;" title="Kliknutím zobrazíte stažení">
+      <div id="bgExportIndicator" class="tool-btn" style="display:none; background:rgba(16, 185, 129, 0.15); border-color:#10b981; color:#10b981; font-weight:700; font-size:11px; cursor:pointer;" title="Kliknutím zobrazíte správce exportů">
         ⏳ Export videa...
       </div>
-      <button class="btn btn-fusion" id="btnOpenFusionModal">
-        ✨ Fusion (.setting)
+      <button class="btn btn-secondary" id="btnOpenExportManagerModal" title="Správce renderovaných videí a fronta úloh" style="display:flex; align-items:center; gap:6px;">
+        📊 Správce exportů <span id="exportBadge" style="display:none; background:var(--accent-cyan); color:#000; font-size:10px; font-weight:800; border-radius:10px; padding:1px 6px;">0</span>
       </button>
       <button class="btn btn-primary" id="btnOpenExportModal">
         🎬 Export DaVinci
@@ -669,6 +669,10 @@
               <span>Vrstva řek (Neruší na pozadí)</span>
               <label class="toggle-switch"><input type="checkbox" id="lodToggleRivers" checked><span class="toggle-slider"></span></label>
             </div>
+            <div class="toggle-item" style="padding:2px 0 6px 0;">
+              <span style="font-size:10.5px; color:var(--text-muted);">Zobrazovat české názvy řek na mapě</span>
+              <label class="toggle-switch"><input type="checkbox" id="lodToggleRiverNames" checked><span class="toggle-slider"></span></label>
+            </div>
             <div style="display:flex; gap:8px; margin-bottom:6px;">
               <div class="form-group" style="flex:1; margin-bottom:0;">
                 <div class="form-label" style="font-size:10px;"><span>Množství toků</span></div>
@@ -1105,6 +1109,11 @@
           Vygeneruje video s plnou průhledností (Alpha kanál). Soubor Apple ProRes 4444 stačí přímo přetáhnout do DaVinci Resolve nad vaše video z kola.
         </p>
 
+        <div class="form-group" style="margin-bottom:12px;">
+          <div class="form-label"><span>Název exportu / scény</span></div>
+          <input type="text" id="exportJobNameInput" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input); text-align:left; padding:0 10px; font-size:12px;" placeholder="Pojmenujte svůj export (např. Průlet_Ceske_Budejovice_Praha)">
+        </div>
+
         <div class="form-group">
           <div class="form-label"><span>Formát videa</span></div>
           <select id="exportFormatSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);">
@@ -1168,9 +1177,54 @@
           </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" id="btnCancelExport">Zavřít</button>
-        <button class="btn btn-emerald" id="btnStartExport">🚀 Spustit render videa</button>
+      <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-secondary" id="btnOpenFusionFromExport" style="font-size:11px; padding:6px 10px;" title="Zobrazit Fusion makro spline křivky (.setting)">
+            ✨ Fusion makro
+          </button>
+          <button class="btn btn-secondary" id="btnOpenManagerFromExport" style="font-size:11px; padding:6px 10px;" title="Otevřít okno Správce exportů">
+            📊 Správce úloh
+          </button>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary" id="btnCancelExport">Zavřít</button>
+          <button class="btn btn-emerald" id="btnStartExport">🚀 Spustit render videa</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EXPORT MANAGER MODAL (SPRÁVCE EXPORTŮ) -->
+  <div class="modal-overlay" id="exportManagerModal" style="display:none;">
+    <div class="modal-card" style="width:740px; max-width:95vw; max-height:85vh; display:flex; flex-direction:column;">
+      <div class="modal-header">
+        <span style="display:flex; align-items:center; gap:8px;">📊 Správce exportů a fronta renderů</span>
+        <button class="modal-close-btn" id="btnCloseExportManagerModal">&times;</button>
+      </div>
+      
+      <!-- Filter Tabs & Actions Header -->
+      <div style="padding:10px 18px; background:var(--bg-panel-alt); border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+        <div style="display:flex; gap:6px;">
+          <button class="tool-btn active" id="btnFilterExportsAll" style="font-size:11px; padding:3px 10px;">Všechny (<span id="countExportsAll">0</span>)</button>
+          <button class="tool-btn" id="btnFilterExportsRunning" style="font-size:11px; padding:3px 10px;">Probíhající (<span id="countExportsRunning">0</span>)</button>
+          <button class="tool-btn" id="btnFilterExportsDone" style="font-size:11px; padding:3px 10px;">Dokončené (<span id="countExportsDone">0</span>)</button>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="tool-btn" id="btnRefreshExports" title="Aktualizovat seznam úloh" style="font-size:11px; padding:4px 8px;">🔄 Obnovit</button>
+          <button class="btn btn-primary" id="btnNewExportFromManager" style="font-size:11px; padding:4px 10px;">+ Nový export</button>
+        </div>
+      </div>
+
+      <!-- Export Jobs Container -->
+      <div class="modal-body" style="flex:1; overflow-y:auto; padding:14px 18px; max-height:calc(85vh - 120px);">
+        <div id="exportManagerEmpty" style="display:none; text-align:center; padding:40px 20px; color:var(--text-muted);">
+          <div style="font-size:36px; margin-bottom:8px;">🎬</div>
+          <div style="font-size:14px; font-weight:700; color:#fff; margin-bottom:4px;">Žádné exporty</div>
+          <div style="font-size:12px;">Zatím jste nevytvořili žádný render. Klikněte na "+ Nový export" pro vygenerování videa.</div>
+        </div>
+        <div id="exportManagerJobsList" style="display:flex; flex-direction:column; gap:10px;">
+          <!-- Dynamically populated job cards -->
+        </div>
       </div>
     </div>
   </div>

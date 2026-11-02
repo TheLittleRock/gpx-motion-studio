@@ -112,6 +112,7 @@ class CanvasRenderer {
       lakes_dams: true,
       lakesOpacity: 0.35,
       rivers: true,
+      riverNames: true,
       riverFilterRank: 3,
       riverOpacity: 0.35,
       riverWidth: 2.5,
@@ -816,12 +817,12 @@ class CanvasRenderer {
     // Screen-space label collision resolution: dynamically suppresses overlapping names (e.g. Sedlec-Prčice & Miličín)
     ctx.font = `${fontWeight} ${fontSize * s}px Inter, sans-serif`;
     const tw = ctx.measureText(name).width;
-    const boxW = tw + (dotRadius + 12) * s;
-    const boxH = fontSize * s * 1.6;
-    const boxX = x - (dotRadius + 4) * s;
+    const boxW = tw + (dotRadius + 14) * s;
+    const boxH = fontSize * s * 1.8;
+    const boxX = x - (dotRadius + 6) * s;
     const boxY = y - boxH / 2;
 
-    if (!this.collisionResolver.place(boxX, boxY, boxW, boxH, 14 * s, 6 * s)) {
+    if (!this.collisionResolver.place(boxX, boxY, boxW, boxH, 18 * s, 10 * s)) {
       return false; // Suppressed due to collision with higher priority or already placed label
     }
 
@@ -944,6 +945,83 @@ class CanvasRenderer {
           else ctx.lineTo(pt.x, pt.y);
         }
         ctx.stroke();
+      }
+
+      // 2B. Subtle River Name Labels along polyline curves
+      if (this.lod && this.lod.riverNames !== false) {
+        ctx.save();
+        ctx.font = `italic 600 ${10 * s}px Inter, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const riverLabelColor = this.hexToRgba(this.colors.river || '#38bdf8', Math.max(0.45, Math.min(0.85, (rOpacity || 0.35) + 0.30)));
+        const strokeColor = 'rgba(10, 15, 24, 0.85)';
+
+        for (const r of layers.rivers) {
+          if (r.id && !this.isFeatureVisible(r.id)) continue;
+          if (r.rank && r.rank > filterRank) continue;
+          if (!r.name || !r.points || r.points.length < 2) continue;
+
+          const pts = filterPtsByMeanders(r.points, meandersLOD);
+          const screenPts = pts.map(p => toScreen(p.mx, p.my));
+
+          let totalLen = 0;
+          const segLens = [];
+          for (let i = 0; i < screenPts.length - 1; i++) {
+            const d = Math.hypot(screenPts[i + 1].x - screenPts[i].x, screenPts[i + 1].y - screenPts[i].y);
+            segLens.push(d);
+            totalLen += d;
+          }
+
+          if (totalLen < 60 * s) continue;
+
+          // Adaptive repetition: at least 1 label, repeating every ~380px on long/zoomed streams
+          const repeatDist = 380 * s;
+          const count = Math.max(1, Math.floor(totalLen / repeatDist));
+          const stepDist = totalLen / (count + 1);
+
+          for (let c = 1; c <= count; c++) {
+            const targetDist = c * stepDist;
+            let acc = 0;
+
+            for (let i = 0; i < segLens.length; i++) {
+              if (acc + segLens[i] >= targetDist) {
+                const segRem = targetDist - acc;
+                const frac = segLens[i] > 0 ? (segRem / segLens[i]) : 0.5;
+                const pA = screenPts[i];
+                const pB = screenPts[i + 1];
+                const lx = pA.x + (pB.x - pA.x) * frac;
+                const ly = pA.y + (pB.y - pA.y) * frac;
+
+                if (lx < 10 || lx > this.width - 10 || ly < 10 || ly > this.height - 10) break;
+
+                let angle = Math.atan2(pB.y - pA.y, pB.x - pA.x);
+                if (angle > Math.PI / 2) angle -= Math.PI;
+                else if (angle < -Math.PI / 2) angle += Math.PI;
+
+                const textW = ctx.measureText(r.name).width;
+                const textH = 14 * s;
+
+                if (this.collisionResolver.place(lx - textW / 2, ly - textH / 2, textW, textH, 14 * s, 8 * s)) {
+                  ctx.save();
+                  ctx.translate(lx, ly);
+                  ctx.rotate(angle);
+
+                  ctx.lineWidth = 2.5 * s;
+                  ctx.strokeStyle = strokeColor;
+                  ctx.strokeText(`〰 ${r.name}`, 0, 0);
+
+                  ctx.fillStyle = riverLabelColor;
+                  ctx.fillText(`〰 ${r.name}`, 0, 0);
+                  ctx.restore();
+                }
+                break;
+              }
+              acc += segLens[i];
+            }
+          }
+        }
+        ctx.restore();
       }
     }
 
@@ -1230,6 +1308,23 @@ class CanvasRenderer {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
+    const startIdx = Math.floor(this.trimIn * (n - 1));
+
+    // 3B. Pre-Trim Completed Route (Segment from 0 to startIdx rendered as already ridden)
+    if (startIdx > 0) {
+      ctx.beginPath();
+      for (let i = 0; i <= startIdx; i++) {
+        const pt = toScreen(points[i].merc_x, points[i].merc_y);
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.strokeStyle = this.colors.path;
+      ctx.lineWidth = Math.max(3.5, this.lineWidth * s);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
     // 4. Active Animated Glowing Trail
     ctx.save();
     if (this.colors.glowIntensity > 0) {
@@ -1237,7 +1332,6 @@ class CanvasRenderer {
       ctx.shadowBlur = this.colors.glowIntensity * 10 * s;
     }
     ctx.beginPath();
-    const startIdx = Math.floor(this.trimIn * (n - 1));
     for (let i = startIdx; i <= idx0; i++) {
       const pt = toScreen(points[i].merc_x, points[i].merc_y);
       if (i === startIdx) ctx.moveTo(pt.x, pt.y);
@@ -1474,6 +1568,23 @@ class CanvasRenderer {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
+    const startIdx = Math.floor(this.trimIn * (n - 1));
+
+    // 2B. Pre-Trim Completed Route (Segment from 0 to startIdx rendered as already ridden)
+    if (startIdx > 0) {
+      ctx.beginPath();
+      for (let i = 0; i <= startIdx; i++) {
+        const pt = toScreen(points[i].merc_x, points[i].merc_y);
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.strokeStyle = this.colors.path;
+      ctx.lineWidth = Math.max(3.5, this.lineWidth * s);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
     // 3. Active Animated Glowing Trail
     ctx.save();
     if (this.colors.glowIntensity > 0) {
@@ -1481,7 +1592,6 @@ class CanvasRenderer {
       ctx.shadowBlur = this.colors.glowIntensity * 10 * s;
     }
     ctx.beginPath();
-    const startIdx = Math.floor(this.trimIn * (n - 1));
     for (let i = startIdx; i <= idx0; i++) {
       const pt = toScreen(points[i].merc_x, points[i].merc_y);
       if (i === startIdx) ctx.moveTo(pt.x, pt.y);
@@ -2312,6 +2422,23 @@ class CanvasRenderer {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
+    const startIdx = Math.floor(this.trimIn * (n - 1));
+
+    // 4B. Pre-Trim Completed Route (Segment from 0 to startIdx rendered as already ridden)
+    if (startIdx > 0) {
+      ctx.beginPath();
+      for (let i = 0; i <= startIdx; i++) {
+        const pt = toMiniMap(points[i].merc_x, points[i].merc_y);
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.strokeStyle = this.colors.path;
+      ctx.lineWidth = Math.max(2.5, 3.5 * s);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
     // 5. Active Glowing Path
     ctx.save();
     if (this.colors.glowIntensity > 0) {
@@ -2319,7 +2446,6 @@ class CanvasRenderer {
       ctx.shadowBlur = this.colors.glowIntensity * 6 * s + 4;
     }
     ctx.beginPath();
-    const startIdx = Math.floor(this.trimIn * (n - 1));
     for (let i = startIdx; i <= riderIdx; i++) {
       const pt = toMiniMap(points[i].merc_x, points[i].merc_y);
       if (i === startIdx) ctx.moveTo(pt.x, pt.y);
@@ -2945,6 +3071,23 @@ class CanvasRenderer {
     ctx.lineWidth = Math.max(2.5, this.lineWidth * 0.8 * s);
     ctx.stroke();
 
+    const startIdx = Math.floor(this.trimIn * (n - 1));
+
+    // 2B. Pre-Trim Completed Route (Segment from 0 to startIdx rendered as already ridden)
+    if (startIdx > 0) {
+      ctx.beginPath();
+      for (let i = 0; i <= startIdx; i++) {
+        const pt = this.mercToScreenTiles(points[i].merc_x, points[i].merc_y, this.camMercX, this.camMercY, tileZoom, w, h);
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      }
+      ctx.strokeStyle = this.colors.path;
+      ctx.lineWidth = Math.max(2.5, this.lineWidth * 0.8 * s);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
     // 3. Active Glowing Path
     ctx.save();
     if (this.colors.glowIntensity > 0) {
@@ -2952,7 +3095,6 @@ class CanvasRenderer {
       ctx.shadowBlur = this.colors.glowIntensity * 8 * s;
     }
     ctx.beginPath();
-    const startIdx = Math.floor(this.trimIn * (n - 1));
     for (let i = startIdx; i <= riderIdx; i++) {
       const pt = this.mercToScreenTiles(points[i].merc_x, points[i].merc_y, this.camMercX, this.camMercY, tileZoom, w, h);
       if (i === startIdx) ctx.moveTo(pt.x, pt.y);

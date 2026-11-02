@@ -7,7 +7,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -43,8 +43,24 @@ class FrameBatch(BaseModel):
     job_id: str
     frames: List[dict] # [{'index': int, 'data': 'data:image/png;base64,...'}]
 
+class CreateExportJobRequest(BaseModel):
+    name: Optional[str] = None
+    project_id: Optional[str] = "default"
+    format: str = "mp4" # mp4 | webm | prores4444 | png_sequence
+    resolution: str = "1920x1080"
+    fps: int = 30
+    duration_sec: float = 10.0
+
+class RenameExportJobRequest(BaseModel):
+    name: str
+
+class ExportActionRequest(BaseModel):
+    action: str # pause | resume | cancel
+
 class FinalizeExportRequest(BaseModel):
     job_id: str
+    name: Optional[str] = None
+    project_id: Optional[str] = "default"
     fps: int = 30
     duration: float = 10.0
     resolution: str = "1920x1080"
@@ -494,13 +510,109 @@ async def upload_asset(file: UploadFile = File(...)):
     }
 
 @app.post("/api/export/start")
-async def start_export():
-    """Initializes a new export job directory."""
+async def start_export(name: Optional[str] = None, format: Optional[str] = "mp4", project_id: Optional[str] = "default"):
+    """Initializes a new export job directory and records it in database."""
     job_id = uuid.uuid4().hex[:10]
     job_dir = EXPORTS_DIR / job_id
     frames_dir = job_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
-    return {"status": "initialized", "job_id": job_id}
+    
+    clean_name = name.strip() if name and name.strip() else f"Export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    job = db.create_export_job({
+        "id": job_id,
+        "project_id": project_id or "default",
+        "name": clean_name,
+        "format": format or "mp4",
+        "resolution": "1920x1080",
+        "fps": 30,
+        "duration_sec": 10.0,
+        "status": "rendering",
+        "progress_pct": 0,
+        "current_step": "Zahajuji render snímků..."
+    })
+    return {"status": "initialized", "job_id": job_id, "job": job}
+
+@app.get("/api/exports")
+async def list_exports(project_id: Optional[str] = None):
+    """Returns list of all export jobs with metadata from SQLite."""
+    jobs = db.list_export_jobs(project_id)
+    return {"status": "success", "jobs": jobs}
+
+@app.post("/api/exports/create")
+async def create_export_job_api(req: CreateExportJobRequest):
+    """Creates a new export job in database and sets up disk directory."""
+    job_id = uuid.uuid4().hex[:10]
+    job_dir = EXPORTS_DIR / job_id
+    frames_dir = job_dir / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    
+    clean_name = req.name.strip() if req.name and req.name.strip() else f"Export_{req.format.upper()}_{datetime.utcnow().strftime('%H%M%S')}"
+    job = db.create_export_job({
+        "id": job_id,
+        "project_id": req.project_id or "default",
+        "name": clean_name,
+        "format": req.format,
+        "resolution": req.resolution,
+        "fps": req.fps,
+        "duration_sec": req.duration_sec,
+        "status": "rendering",
+        "progress_pct": 0,
+        "current_step": "Zahajuji render snímků..."
+    })
+    return {"status": "created", "job": job}
+
+@app.patch("/api/exports/{job_id}/rename")
+async def rename_export_job_api(job_id: str, req: RenameExportJobRequest):
+    """Renames an existing export job."""
+    updated = db.rename_export_job(job_id, req.name)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Export job not found")
+    return {"status": "success", "job": updated}
+
+@app.post("/api/exports/{job_id}/action")
+async def export_job_action_api(job_id: str, req: ExportActionRequest):
+    """Pauses, resumes, or cancels an active export job."""
+    job = db.get_export_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Export job not found")
+
+    act = req.action.lower()
+    if act == "pause":
+        updated = db.update_export_job(job_id, {"status": "paused", "current_step": "Pozastaveno uživatelem"})
+    elif act == "resume":
+        updated = db.update_export_job(job_id, {"status": "rendering", "current_step": "Pokračuji v renderu..."})
+    elif act == "cancel":
+        updated = db.update_export_job(job_id, {"status": "canceled", "current_step": "Zrušeno uživatelem"})
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown action '{act}'")
+    return {"status": "success", "job": updated}
+
+@app.delete("/api/exports/{job_id}")
+async def delete_export_job_api(job_id: str):
+    """Deletes an export job and removes its generated files from disk."""
+    import shutil
+    job_dir = EXPORTS_DIR / job_id
+    if job_dir.exists():
+        shutil.rmtree(job_dir, ignore_errors=True)
+    db.delete_export_job(job_id)
+    if job_id in EXPORT_JOBS:
+        del EXPORT_JOBS[job_id]
+    return {"status": "deleted", "job_id": job_id}
+
+@app.post("/api/export/upload-frame-binary")
+async def upload_frame_binary(request: Request, job_id: str = Query(...), index: Optional[int] = None, frame_index: Optional[int] = None):
+    """High-speed direct binary upload of individual frame without base64 or multipart overhead."""
+    f_idx = index if index is not None else (frame_index if frame_index is not None else 0)
+    job_dir = EXPORTS_DIR / job_id
+    frames_dir = job_dir / "frames"
+    if not frames_dir.exists():
+        frames_dir.mkdir(parents=True, exist_ok=True)
+
+    frame_file = frames_dir / f"frame_{f_idx:05d}.png"
+    contents = await request.body()
+    with open(frame_file, "wb") as f:
+        f.write(contents)
+    return {"status": "ok", "index": f_idx}
 
 @app.post("/api/export/upload-frames")
 async def upload_frames(batch: FrameBatch):
@@ -508,7 +620,7 @@ async def upload_frames(batch: FrameBatch):
     job_dir = EXPORTS_DIR / batch.job_id
     frames_dir = job_dir / "frames"
     if not frames_dir.exists():
-        raise HTTPException(status_code=404, detail="Job directory not found")
+        frames_dir.mkdir(parents=True, exist_ok=True)
 
     saved_count = 0
     for frame in batch.frames:
@@ -528,7 +640,12 @@ EXPORT_JOBS = {}
 
 async def _encode_worker(cmd, out_path, job_id, export_format, snapshot_url):
     try:
-        EXPORT_JOBS[job_id] = {"status": "encoding", "progress": 50, "format": export_format}
+        EXPORT_JOBS[job_id] = {"status": "encoding", "progress": 82, "format": export_format}
+        db.update_export_job(job_id, {
+            "status": "encoding",
+            "progress_pct": 85,
+            "current_step": f"Kóduji {export_format.upper()} přes FFmpeg..."
+        })
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -538,19 +655,31 @@ async def _encode_worker(cmd, out_path, job_id, export_format, snapshot_url):
         if process.returncode != 0:
             err_msg = stderr.decode()[-500:] if stderr else "Unknown ffmpeg error"
             EXPORT_JOBS[job_id] = {"status": "error", "error": err_msg}
+            db.update_export_job(job_id, {"status": "error", "current_step": f"Chyba FFmpeg: {err_msg}"})
             return
 
         file_size_mb = round(out_path.stat().st_size / (1024 * 1024), 2)
+        download_url = f"/exports/{job_id}/{out_path.name}"
         EXPORT_JOBS[job_id] = {
             "status": "complete",
             "format": export_format,
             "filename": out_path.name,
             "size_mb": file_size_mb,
-            "download_url": f"/exports/{job_id}/{out_path.name}",
+            "download_url": download_url,
             "snapshot_url": snapshot_url
         }
+        db.update_export_job(job_id, {
+            "status": "completed",
+            "progress_pct": 100,
+            "current_step": "Render dokončen!",
+            "file_path": str(out_path),
+            "file_size_mb": file_size_mb,
+            "download_url": download_url,
+            "snapshot_url": snapshot_url
+        })
     except Exception as e:
         EXPORT_JOBS[job_id] = {"status": "error", "error": str(e)}
+        db.update_export_job(job_id, {"status": "error", "current_step": f"Chyba: {e}"})
 
 @app.get("/api/export/status/{job_id}")
 async def get_export_status(job_id: str):
@@ -645,6 +774,15 @@ async def finalize_export(req: FinalizeExportRequest):
     else: # png_sequence
         out_filename = "frames"
         out_path = frames_dir
+        db.update_export_job(req.job_id, {
+            "status": "completed",
+            "progress_pct": 100,
+            "current_step": "PNG sekvence připravena",
+            "file_path": str(frames_dir),
+            "file_size_mb": round(len(frames) * 1.5, 1),
+            "download_url": f"/exports/{req.job_id}/frames/",
+            "snapshot_url": snapshot_url
+        })
         return {
             "status": "success",
             "format": "png_sequence",
@@ -664,6 +802,11 @@ async def finalize_export(req: FinalizeExportRequest):
         }
 
     # Synchronous execution
+    db.update_export_job(req.job_id, {
+        "status": "encoding",
+        "progress_pct": 85,
+        "current_step": f"Kóduji {req.export_format.upper()} přes FFmpeg..."
+    })
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -673,16 +816,27 @@ async def finalize_export(req: FinalizeExportRequest):
 
     if process.returncode != 0:
         err_msg = stderr.decode()[-500:] if stderr else "Unknown ffmpeg error"
+        db.update_export_job(req.job_id, {"status": "error", "current_step": f"Chyba FFmpeg: {err_msg}"})
         raise HTTPException(status_code=500, detail=f"FFmpeg encoding failed: {err_msg}")
 
     file_size_mb = round(out_path.stat().st_size / (1024 * 1024), 2)
+    download_url = f"/exports/{req.job_id}/{out_filename}"
+    db.update_export_job(req.job_id, {
+        "status": "completed",
+        "progress_pct": 100,
+        "current_step": "Render dokončen!",
+        "file_path": str(out_path),
+        "file_size_mb": file_size_mb,
+        "download_url": download_url,
+        "snapshot_url": snapshot_url
+    })
     return {
         "status": "success",
         "format": req.export_format,
         "filename": out_filename,
         "size_mb": file_size_mb,
         "file_path": str(out_path),
-        "download_url": f"/exports/{req.job_id}/{out_filename}",
+        "download_url": download_url,
         "snapshot_url": snapshot_url,
         "frames_path": str(frames_dir),
         "frames_count": len(frames)
