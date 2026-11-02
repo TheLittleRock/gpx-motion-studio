@@ -48,7 +48,7 @@ class CanvasRenderer {
     this.height = 1080;
     this.refWidth = 1920;
     this.refHeight = 1080;
-    this.canvasScaleFactor = 1.0;
+    this.canvasScaleFactor = null;
     
     // Animation Modes:
     // 'hud'        (Mode 1: Transparent Telemetry HUD)
@@ -775,7 +775,7 @@ class CanvasRenderer {
         this.renderModeHUD(idx0, interp, currentMercX, currentMercY, effectiveProgress, currentDist, currentEle, currentGrade);
         break;
       case 'flyover':
-        this.renderModeFlyover(idx0, interp, currentMercX, currentMercY, p0, p1, effectiveProgress, currentDist, currentEle, currentGrade);
+        this.renderModeFlyover(idx0, interp, currentMercX, currentMercY, p0, p1, effectiveProgress, currentDist, currentEle, currentGrade, deltaTime);
         break;
       case 'fullscreen':
         this.renderModeFullscreenRoute(idx0, interp, currentMercX, currentMercY, effectiveProgress, currentDist, currentEle);
@@ -798,6 +798,24 @@ class CanvasRenderer {
 
     if (needScale) {
       ctx.restore();
+    }
+  }
+
+  // Guaranteed Tile-Complete Render for Video Export (awaits missing tiles and re-renders)
+  async renderFrameForExport(deltaTime = 0.016) {
+    this.isExporting = true;
+    this.pendingExportTiles = [];
+    this.render(deltaTime);
+
+    if (this.pendingExportTiles && this.pendingExportTiles.length > 0) {
+      try {
+        await Promise.all(this.pendingExportTiles);
+      } catch (err) {
+        console.warn('Some export tiles failed to decode:', err);
+      }
+      this.pendingExportTiles = [];
+      // Re-render frame immediately with all newly loaded tiles painted
+      this.render(0);
     }
   }
 
@@ -838,16 +856,27 @@ class CanvasRenderer {
           if (!entry) {
             const img = new Image();
             img.crossOrigin = 'anonymous';
-            entry = { img, loaded: false };
+            let resolveFn;
+            const promise = new Promise((resolve) => { resolveFn = resolve; });
+            entry = { img, loaded: false, promise, resolve: resolveFn };
             this.tileCache.set(key, entry);
             img.onload = () => {
               entry.loaded = true;
+              if (entry.resolve) entry.resolve(true);
               if (typeof this.onTileLoaded === 'function') {
                 this.onTileLoaded();
               }
             };
-            img.onerror = () => { entry.error = true; };
+            img.onerror = () => {
+              entry.error = true;
+              if (entry.resolve) entry.resolve(false);
+            };
             img.src = `/api/tiles/${provider}/${z}/${x}/${y}`;
+          }
+
+          if (this.isExporting && !entry.loaded && !entry.error && entry.promise) {
+            if (!this.pendingExportTiles) this.pendingExportTiles = [];
+            this.pendingExportTiles.push(entry.promise);
           }
 
           const screenX = (x * 256 - centerX) * scaleFactor + viewportW / 2 + offsetX;
@@ -1320,8 +1349,8 @@ class CanvasRenderer {
   }
 
   // --- MODE 2: MOVING CAMERA FLYOVER ---
-  renderModeFlyover(idx0, interp, curMercX, curMercY, p0, p1, progress, dist, ele, grade) {
-    this.drawMapFlyover(idx0, interp, curMercX, curMercY, p0, p1);
+  renderModeFlyover(idx0, interp, curMercX, curMercY, p0, p1, progress, dist, ele, grade, deltaTime = 0.016) {
+    this.drawMapFlyover(idx0, interp, curMercX, curMercY, p0, p1, deltaTime);
     if (this.toggles.elevation) {
       this.drawElevationProfile(progress, dist, ele, grade);
     }
@@ -2338,10 +2367,19 @@ class CanvasRenderer {
     const cur = (this.hudLayout && this.hudLayout[key]) ? this.hudLayout[key] : {};
     let w = (cur.w && !isNaN(cur.w)) ? Number(cur.w) : def.w;
     let x = (cur.x !== undefined && !isNaN(cur.x)) ? Number(cur.x) : def.x;
+    let y = (cur.y !== undefined && !isNaN(cur.y)) ? Number(cur.y) : def.y;
+
+    // Automatic normalization for coordinates previously saved in 4K resolution space
+    if (x > 1920) x /= 2;
+    if (y > 1080) y /= 2;
+
+    // Clamp coordinates safely into virtual 1920x1080 boundaries
+    x = Math.max(10, Math.min(1920 - 40, x));
+    y = Math.max(10, Math.min(1080 - 40, y));
 
     // In split route mode, adapt elevation profile width so it stays neatly in the left HUD column
     if (this.animationMode === 'split' && key === 'elevation') {
-      const maxSplitW = Math.round(this.width * 0.40); // e.g. 768px on 1080p
+      const maxSplitW = 768; // 40% of 1920
       if (w > maxSplitW) {
         w = maxSplitW;
       }
@@ -2349,7 +2387,7 @@ class CanvasRenderer {
 
     return {
       x: x,
-      y: (cur.y !== undefined && !isNaN(cur.y)) ? Number(cur.y) : def.y,
+      y: y,
       w: w,
       h: (cur.h && !isNaN(cur.h)) ? Number(cur.h) : def.h,
       scale: (cur.scale && !isNaN(cur.scale)) ? Number(cur.scale) : def.scale,
@@ -3068,9 +3106,9 @@ class CanvasRenderer {
     ctx.shadowBlur = 0;
     ctx.globalAlpha = Math.min(1.0, factor * 1.5);
 
-    const slideOffset = (1.0 - factor) * 35 * s;
-    const cardX = 40 * s;
-    const cardY = (145 + slideOffset) * s;
+    const slideOffset = (1.0 - factor) * 35;
+    const cardX = 40;
+    const cardY = 145 + slideOffset;
     const cardW = 390 * s;
     const cardH = 72 * s;
 
@@ -3136,11 +3174,12 @@ class CanvasRenderer {
   }
 
   // --- MAP FLYOVER (MODE 2) ---
-  drawMapFlyover(riderIdx, interp, curMercX, curMercY, p0, p1) {
+  drawMapFlyover(riderIdx, interp, curMercX, curMercY, p0, p1, deltaTime = 0.016) {
     const ctx = this.ctx;
     const w = 1920;
     const h = 1080;
     const s = this.hudScale;
+    const dt = Math.max(0.001, Math.min(0.1, deltaTime || 0.016));
 
     // Dynamic zoom evaluated from Zoom Ramp curve + user camera zoom slider
     const tSpan = Math.max(0.0001, (this.trimOut - this.trimIn));
@@ -3153,16 +3192,30 @@ class CanvasRenderer {
       this.camMercX = curMercX;
       this.camMercY = curMercY;
     } else {
-      const damp = (this.camDamping !== undefined && !isNaN(this.camDamping)) ? this.camDamping : 0.10;
-      this.camMercX += (curMercX - this.camMercX) * damp;
-      this.camMercY += (curMercY - this.camMercY) * damp;
+      const userDamp = (this.camDamping !== undefined && !isNaN(this.camDamping)) ? this.camDamping : 0.10;
+      // Exponential frame-rate independent camera tracking
+      const dampRate = Math.max(1.0, userDamp * 63.2);
+      const dampBlend = 1.0 - Math.exp(-dampRate * dt);
+      this.camMercX += (curMercX - this.camMercX) * dampBlend;
+      this.camMercY += (curMercY - this.camMercY) * dampBlend;
     }
 
     let targetHeading = 0;
     if (this.followHeading) {
-      targetHeading = Math.atan2(p1.merc_y - p0.merc_y, p1.merc_x - p0.merc_x) - Math.PI / 2;
+      const pts = this.getSmoothedPoints();
+      const lookaheadIdx = Math.min(pts.length - 1, riderIdx + 6);
+      const pAhead = pts[lookaheadIdx] || p1;
+      targetHeading = Math.atan2(pAhead.merc_y - p0.merc_y, pAhead.merc_x - p0.merc_x) - Math.PI / 2;
     }
-    this.camHeading += (targetHeading - this.camHeading) * 0.08;
+    if (this.camHeading === undefined || isNaN(this.camHeading)) {
+      this.camHeading = targetHeading;
+    } else {
+      let diffHeading = targetHeading - this.camHeading;
+      while (diffHeading > Math.PI) diffHeading -= 2 * Math.PI;
+      while (diffHeading < -Math.PI) diffHeading += 2 * Math.PI;
+      const headingBlend = 1.0 - Math.exp(-5.0 * dt);
+      this.camHeading += diffHeading * headingBlend;
+    }
 
     ctx.save();
     if (this.followHeading) {

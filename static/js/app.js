@@ -1425,10 +1425,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   canvas.addEventListener('mousedown', (e) => {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const cx = (e.clientX - rect.left) * scaleX;
-    const cy = (e.clientY - rect.top) * scaleY;
+    const cx = (e.clientX - rect.left) * (1920 / rect.width);
+    const cy = (e.clientY - rect.top) * (1080 / rect.height);
 
     // Check hit on widgets
     let hitWidget = null;
@@ -1496,10 +1494,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('mousemove', (e) => {
     if (!gizmoDragMode) return;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const cx = (e.clientX - rect.left) * scaleX;
-    const cy = (e.clientY - rect.top) * scaleY;
+    const cx = (e.clientX - rect.left) * (1920 / rect.width);
+    const cy = (e.clientY - rect.top) * (1080 / rect.height);
 
     if (gizmoDragMode === 'pan_map') {
       const dx = cx - gizmoStartMouse.x;
@@ -1910,6 +1906,10 @@ document.addEventListener('DOMContentLoaded', () => {
   resSelect.addEventListener('change', (e) => {
     const parts = e.target.value.split('x');
     renderer.setResolution(parseInt(parts[0]), parseInt(parts[1]));
+    if (!state.isPlaying) {
+      renderer.render();
+    }
+    showToast(`Rozlišení viewportu: ${e.target.options[e.target.selectedIndex].text}`);
   });
 
   btnToggleChecker.addEventListener('click', () => {
@@ -3357,7 +3357,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const provider = offRenderer.tileProvider || 'mapy_outdoor';
     const tilesToLoad = new Map();
-    const sampleSteps = Math.min(80, Math.max(20, totalFrames));
+    const sampleSteps = Math.min(120, Math.max(40, totalFrames));
     const viewportW = 1920;
     const viewportH = 1080;
 
@@ -3372,8 +3372,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const tSpan = Math.max(0.0001, (offRenderer.trimOut - offRenderer.trimIn));
         const clipProg = Math.max(0, Math.min(1, (effProg - offRenderer.trimIn) / tSpan));
         const rampZoom = offRenderer.getZoomAtProgress ? offRenderer.getZoomAtProgress(clipProg) : 1.0;
-        const userZoom = (offRenderer.camZoom !== undefined && !isNaN(offRenderer.camZoom)) ? offRenderer.camZoom : 2.2;
-        zoom = Math.max(8.0, Math.min(17.5, (userZoom * rampZoom) + 6.8));
+        const userCamZoom = (offRenderer.camZoom !== undefined && !isNaN(offRenderer.camZoom)) ? offRenderer.camZoom : 2.2;
+        zoom = Math.max(8.0, Math.min(18.0, 10.0 + userCamZoom * 1.5 + (rampZoom - 2.2) * 1.2));
         centerMx = interp.p0.merc_x + (interp.p1.merc_x - interp.p0.merc_x) * interp.interp;
         centerMy = interp.p0.merc_y + (interp.p1.merc_y - interp.p0.merc_y) * interp.interp;
       } else if (offRenderer.animationMode === 'split') {
@@ -3408,8 +3408,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const scaleFactor = Math.pow(2, zClamped - z);
         const cX = centerMx * n * 256;
         const cY = centerMy * n * 256;
-        const halfW = (viewportW / 2) / scaleFactor;
-        const halfH = (viewportH / 2) / scaleFactor;
+        // Expanded bounding radius to guarantee 100% tile coverage under camera rotation and damping
+        const maxRadius = 1400;
+        const halfW = maxRadius / scaleFactor;
+        const halfH = maxRadius / scaleFactor;
 
         const minX = Math.floor((cX - halfW) / 256) - 1;
         const maxX = Math.floor((cX + halfW) / 256) + 1;
@@ -3433,7 +3435,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (total === 0) return;
 
     let loaded = 0;
-    const CONCURRENCY = 6;
+    const CONCURRENCY = 8;
     let idx = 0;
 
     async function loadWorker() {
@@ -3599,6 +3601,48 @@ document.addEventListener('DOMContentLoaded', () => {
       let lastFpsFrame = 0;
       let currentFps = 0;
 
+      // Pre-compute progress lookup table integrating speed ramp curve
+      const progressTable = [];
+      const totalSteps = 2000;
+      const speedDt = [];
+      let totalIntegratedTime = 0;
+      for (let s = 0; s < totalSteps; s++) {
+        const u = s / (totalSteps - 1);
+        const spd = Math.max(0.15, Math.min(10.0, getSpeedAtProgress(u)));
+        const dt = (1.0 / totalSteps) / spd;
+        speedDt.push(dt);
+        totalIntegratedTime += dt;
+      }
+
+      for (let i = 0; i < totalExportFrames; i++) {
+        const tNorm = i / (totalExportFrames - 1 || 1);
+        const targetTime = tNorm * totalIntegratedTime;
+        let accum = 0;
+        let u = 1.0;
+        for (let s = 0; s < totalSteps; s++) {
+          accum += speedDt[s];
+          if (accum >= targetTime) {
+            u = s / (totalSteps - 1);
+            break;
+          }
+        }
+        progressTable.push(u);
+      }
+
+      // Pre-warm camera position & heading at start of export to eliminate initial damping shock
+      const firstProg = offRenderer.trimIn + progressTable[0] * (offRenderer.trimOut - offRenderer.trimIn);
+      const firstInterp = offRenderer.getTrackInterpolationAtProgress ? offRenderer.getTrackInterpolationAtProgress(firstProg) : null;
+      if (firstInterp) {
+        const p0 = firstInterp.p0;
+        const p1 = firstInterp.p1;
+        const interpVal = firstInterp.interp;
+        offRenderer.camMercX = p0.merc_x + (p1.merc_x - p0.merc_x) * interpVal;
+        offRenderer.camMercY = p0.merc_y + (p1.merc_y - p0.merc_y) * interpVal;
+        if (offRenderer.followHeading) {
+          offRenderer.camHeading = Math.atan2(p1.merc_y - p0.merc_y, p1.merc_x - p0.merc_x) - Math.PI / 2;
+        }
+      }
+
       for (let i = 0; i < totalExportFrames; i++) {
         while (clientExportStates[job_id] === 'paused') {
           exportProgressStatus.textContent = `Pozastaveno na snímku ${i}/${totalExportFrames}`;
@@ -3613,14 +3657,14 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        const norm = i / (totalExportFrames - 1 || 1);
+        const u = progressTable[i];
+        offRenderer.progress = offRenderer.trimIn + u * (offRenderer.trimOut - offRenderer.trimIn);
         if (state.trimMode === 'fit') {
-          offRenderer.currentTime = norm * state.durationSec;
+          offRenderer.currentTime = (i / (totalExportFrames - 1 || 1)) * state.durationSec;
         } else {
-          offRenderer.currentTime = (offRenderer.trimIn + norm * (offRenderer.trimOut - offRenderer.trimIn)) * state.durationSec;
+          offRenderer.currentTime = (offRenderer.trimIn + u * (offRenderer.trimOut - offRenderer.trimIn)) * state.durationSec;
         }
-        offRenderer.progress = offRenderer.trimIn + norm * (offRenderer.trimOut - offRenderer.trimIn);
-        offRenderer.render(1.0 / chosenFps);
+        await offRenderer.renderFrameForExport(1.0 / chosenFps);
 
         const blob = await canvasToBlob(offscreen);
 
