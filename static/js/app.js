@@ -319,6 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (s.spotlight) renderer.spotlight = JSON.parse(JSON.stringify(s.spotlight));
     if (s.speedKeyframes) {
       speedKeyframes = JSON.parse(JSON.stringify(s.speedKeyframes));
+      updateSpeedProgressTable();
       drawSpeedCurve();
     }
     if (s.zoomKeyframes) {
@@ -879,6 +880,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         speedKeyframes = [{ progress: 0.0, speed: 1.0 }, { progress: 1.0, speed: 1.0 }];
       }
+      updateSpeedProgressTable();
       drawSpeedCurve();
       drawZoomCurve();
 
@@ -1224,6 +1226,49 @@ document.addEventListener('DOMContentLoaded', () => {
     return speedKeyframes[speedKeyframes.length - 1].speed;
   }
 
+  function updateSpeedProgressTable() {
+    const totalSteps = 2000;
+    const speedDt = [];
+    let totalIntegratedTime = 0;
+    for (let s = 0; s < totalSteps; s++) {
+      const u = s / (totalSteps - 1);
+      const spd = Math.max(0.15, Math.min(10.0, getSpeedAtProgress(u)));
+      const dt = (1.0 / totalSteps) / spd;
+      speedDt.push(dt);
+      totalIntegratedTime += dt;
+    }
+
+    const table = [];
+    for (let s = 0; s < totalSteps; s++) {
+      const tNorm = s / (totalSteps - 1);
+      const targetTime = tNorm * totalIntegratedTime;
+      let accum = 0;
+      let u = 1.0;
+      for (let k = 0; k < totalSteps; k++) {
+        accum += speedDt[k];
+        if (accum >= targetTime) {
+          u = k / (totalSteps - 1);
+          break;
+        }
+      }
+      table.push(u);
+    }
+    renderer.progressTable = table;
+    return table;
+  }
+
+  function lookupProgressFromTable(table, tNorm) {
+    if (!table || table.length === 0) return tNorm;
+    if (tNorm <= 0) return table[0];
+    if (tNorm >= 1) return table[table.length - 1];
+    const n = table.length;
+    const idxExact = tNorm * (n - 1);
+    const i0 = Math.floor(idxExact);
+    const i1 = Math.min(n - 1, i0 + 1);
+    const frac = idxExact - i0;
+    return table[i0] + (table[i1] - table[i0]) * frac;
+  }
+
   function drawSpeedCurve() {
     if (!speedCurveCanvas) return;
     const ctx = speedCurveCanvas.getContext('2d');
@@ -1253,15 +1298,9 @@ document.addEventListener('DOMContentLoaded', () => {
       ctx.fillText(`${sVal.toFixed(1)}x`, 6, y - 3);
     });
 
-    // 2. Playhead cursor (normalized to active clip progress)
-    let clipP;
-    if (state.trimMode === 'fit') {
-      clipP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-    } else {
-      const tSpan = Math.max(0.0001, renderer.trimOut - renderer.trimIn);
-      const curP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-      clipP = Math.max(0, Math.min(1, (curP - renderer.trimIn) / tSpan));
-    }
+    // 2. Playhead cursor (normalized to active clip progress u)
+    const tSpan = Math.max(0.0001, renderer.trimOut - renderer.trimIn);
+    const clipP = Math.max(0, Math.min(1, (renderer.progress - renderer.trimIn) / tSpan));
     const curX = toX(clipP);
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
@@ -1330,7 +1369,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const newS = Math.max(0.25, Math.min(4.0, minS + ((h - 10 - my) / (h - 20)) * (maxS - minS)));
       speedKeyframes.push({ progress: newP, speed: Number(newS.toFixed(2)) });
       speedKeyframes.sort((a, b) => a.progress - b.progress);
+      updateSpeedProgressTable();
+      renderTimelineWaypoints();
       drawSpeedCurve();
+      if (!state.isPlaying) renderer.render();
     }
   });
 
@@ -1362,7 +1404,10 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         speedKeyframes[hitIdx].speed = 1.0;
       }
+      updateSpeedProgressTable();
+      renderTimelineWaypoints();
       drawSpeedCurve();
+      if (!state.isPlaying) renderer.render();
       saveCurrentProjectSettings();
       showToast('🗑️ Bod rychlosti odstraněn');
     }
@@ -1388,6 +1433,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   window.addEventListener('mouseup', () => {
+    if (isDraggingSpeedKnot) {
+      updateSpeedProgressTable();
+      renderTimelineWaypoints();
+      if (!state.isPlaying) renderer.render();
+      saveCurrentProjectSettings();
+    }
     isDraggingSpeedKnot = false;
     selectedSpeedKnot = null;
   });
@@ -1395,7 +1446,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Presets
   btnSpeedUniform.addEventListener('click', () => {
     speedKeyframes = [{ progress: 0.0, speed: 1.0 }, { progress: 1.0, speed: 1.0 }];
+    updateSpeedProgressTable();
+    renderTimelineWaypoints();
     drawSpeedCurve();
+    if (!state.isPlaying) renderer.render();
+    saveCurrentProjectSettings();
   });
   btnSpeedFastTransfers.addEventListener('click', () => {
     speedKeyframes = [
@@ -1405,7 +1460,11 @@ document.addEventListener('DOMContentLoaded', () => {
       { progress: 0.75, speed: 3.2 },
       { progress: 1.0, speed: 1.0 }
     ];
+    updateSpeedProgressTable();
+    renderTimelineWaypoints();
     drawSpeedCurve();
+    if (!state.isPlaying) renderer.render();
+    saveCurrentProjectSettings();
   });
   btnSpeedClimbSlowdown.addEventListener('click', () => {
     speedKeyframes = [
@@ -1414,7 +1473,11 @@ document.addEventListener('DOMContentLoaded', () => {
       { progress: 0.6, speed: 2.2 },
       { progress: 1.0, speed: 1.0 }
     ];
+    updateSpeedProgressTable();
+    renderTimelineWaypoints();
     drawSpeedCurve();
+    if (!state.isPlaying) renderer.render();
+    saveCurrentProjectSettings();
   });
 
   // ==================== 4. ON-CANVAS DRAG & SCALE GIZMO ====================
@@ -1718,19 +1781,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const deltaTime = (timestamp - state.lastTimestamp) / 1000.0;
     state.lastTimestamp = timestamp;
 
-    if (state.isPlaying) {
-      // Evaluate speed multiplier from Bezier speed ramp curve normalized over active clip!
-      let clipProg;
-      if (state.trimMode === 'fit') {
-        clipProg = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-      } else {
-        const tSpan = Math.max(0.0001, renderer.trimOut - renderer.trimIn);
-        const curProg = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-        clipProg = Math.max(0, Math.min(1, (curProg - renderer.trimIn) / tSpan));
-      }
-      const speedMultiplier = getSpeedAtProgress(clipProg) * state.playbackSpeed;
+    if (!renderer.progressTable || renderer.progressTable.length === 0) {
+      updateSpeedProgressTable();
+    }
 
-      state.currentTime += deltaTime * speedMultiplier;
+    if (state.isPlaying) {
+      state.currentTime += deltaTime * state.playbackSpeed;
 
       if (state.trimMode === 'fit') {
         // Mode B: Full Duration Fit. Animation plays from 0 to durationSec
@@ -1769,10 +1825,18 @@ document.addEventListener('DOMContentLoaded', () => {
     renderer.trimMode = state.trimMode;
 
     if (state.trimMode === 'fit') {
-      const norm = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-      renderer.progress = renderer.trimIn + norm * (renderer.trimOut - renderer.trimIn);
+      const tNorm = state.durationSec > 0 ? Math.max(0, Math.min(1, state.currentTime / state.durationSec)) : 0;
+      const u = lookupProgressFromTable(renderer.progressTable, tNorm);
+      renderer.progress = renderer.trimIn + u * (renderer.trimOut - renderer.trimIn);
+      renderer.currentClipTime = state.currentTime;
     } else {
-      renderer.progress = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+      const minTime = renderer.trimIn * state.durationSec;
+      const maxTime = renderer.trimOut * state.durationSec;
+      const spanTime = Math.max(0.0001, maxTime - minTime);
+      const tNorm = Math.max(0, Math.min(1, (state.currentTime - minTime) / spanTime));
+      const u = lookupProgressFromTable(renderer.progressTable, tNorm);
+      renderer.progress = renderer.trimIn + u * (renderer.trimOut - renderer.trimIn);
+      renderer.currentClipTime = Math.max(0, state.currentTime - minTime);
     }
 
     renderer.render(deltaTime);
@@ -1784,6 +1848,25 @@ document.addEventListener('DOMContentLoaded', () => {
     renderer.durationSec = state.durationSec;
     renderer.currentTime = state.currentTime;
     renderer.trimMode = state.trimMode;
+
+    if (!renderer.progressTable || renderer.progressTable.length === 0) {
+      updateSpeedProgressTable();
+    }
+
+    if (state.trimMode === 'fit') {
+      const tNorm = state.durationSec > 0 ? Math.max(0, Math.min(1, state.currentTime / state.durationSec)) : 0;
+      const u = lookupProgressFromTable(renderer.progressTable, tNorm);
+      renderer.progress = renderer.trimIn + u * (renderer.trimOut - renderer.trimIn);
+      renderer.currentClipTime = state.currentTime;
+    } else {
+      const minTime = renderer.trimIn * state.durationSec;
+      const maxTime = renderer.trimOut * state.durationSec;
+      const spanTime = Math.max(0.0001, maxTime - minTime);
+      const tNorm = Math.max(0, Math.min(1, (state.currentTime - minTime) / spanTime));
+      const u = lookupProgressFromTable(renderer.progressTable, tNorm);
+      renderer.progress = renderer.trimIn + u * (renderer.trimOut - renderer.trimIn);
+      renderer.currentClipTime = Math.max(0, state.currentTime - minTime);
+    }
 
     const cur = state.currentTime;
     const tot = state.durationSec;
@@ -2379,6 +2462,9 @@ document.addEventListener('DOMContentLoaded', () => {
       state.trimMode = 'slice';
       btnTrimModeSlice.classList.add('active');
       btnTrimModeFit.classList.remove('active');
+      renderTimelineWaypoints();
+      updateTimeDisplay();
+      if (!state.isPlaying) renderer.render();
       saveCurrentProjectSettings();
       showToast('Režim ořezu: Časový výřez z celkové trasy');
     });
@@ -2386,6 +2472,9 @@ document.addEventListener('DOMContentLoaded', () => {
       state.trimMode = 'fit';
       btnTrimModeFit.classList.add('active');
       btnTrimModeSlice.classList.remove('active');
+      renderTimelineWaypoints();
+      updateTimeDisplay();
+      if (!state.isPlaying) renderer.render();
       saveCurrentProjectSettings();
       showToast('Režim ořezu: Úsek roztažen na plnou délku animace');
     });
@@ -2470,6 +2559,14 @@ document.addEventListener('DOMContentLoaded', () => {
     trimVal.textContent = `${Math.round(renderer.trimIn * 100)}% (${renderer.trimInKm.toFixed(1)} km) — ${Math.round(renderer.trimOut * 100)}% (${renderer.trimOutKm.toFixed(1)} km)`;
     scrubberSegmentRange.style.left = `${renderer.trimIn * 100}%`;
     scrubberSegmentRange.style.width = `${(renderer.trimOut - renderer.trimIn) * 100}%`;
+
+    renderTimelineWaypoints();
+    drawSpeedCurve();
+    drawZoomCurve();
+    if (!state.isPlaying) {
+      updateTimeDisplay();
+      renderer.render();
+    }
   }
   trimInSlider.addEventListener('input', () => updateTrim('slider', 'in'));
   trimOutSlider.addEventListener('input', () => updateTrim('slider', 'out'));
@@ -3268,33 +3365,35 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderTimelineWaypoints() {
     timelineWaypointsContainer.innerHTML = '';
     const wps = renderer.waypoints || [];
-    const curProg = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+    const clipDur = (state.trimMode === 'slice')
+      ? Math.max(0.5, (renderer.trimOut - renderer.trimIn) * state.durationSec)
+      : state.durationSec;
 
     wps.forEach((wp) => {
-      const pts = renderer.gpxData ? renderer.gpxData.points : null;
-      let displayProg = wp.progress || 0;
-      if (pts && pts.length > 0 && typeof renderer.getWaypointTrackIndex === 'function') {
-        const trackIdx = renderer.getWaypointTrackIndex(wp);
-        const trackProg = trackIdx / Math.max(1, pts.length - 1);
-        if (state.trimMode === 'fit') {
-          displayProg = (trackProg - renderer.trimIn) / Math.max(0.0001, renderer.trimOut - renderer.trimIn);
-        } else {
-          displayProg = trackProg;
-        }
-      }
-      if (displayProg < 0 || displayProg > 1) return;
+      const arrivalSec = renderer.getWaypointArrivalTimeSec ? renderer.getWaypointArrivalTimeSec(wp) : null;
+      if (arrivalSec === null) return;
 
+      const displayRatio = Math.max(0, Math.min(1, arrivalSec / clipDur));
       const marker = document.createElement('div');
       marker.className = 'timeline-waypoint-marker';
-      if (Math.abs(curProg - displayProg) < 0.015) {
+
+      const currentClipSec = (state.trimMode === 'slice')
+        ? Math.max(0, state.currentTime - renderer.trimIn * state.durationSec)
+        : state.currentTime;
+
+      if (Math.abs(currentClipSec - arrivalSec) < 0.25) {
         marker.classList.add('active');
       }
-      marker.style.left = `${displayProg * 100}%`;
-      marker.innerHTML = `<div class="timeline-wp-tooltip">${wp.title} (${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : ((displayProg * 100).toFixed(0) + '%')})</div>`;
+      marker.style.left = `${displayRatio * 100}%`;
+      marker.innerHTML = `<div class="timeline-wp-tooltip">${wp.title} (${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : ((displayRatio * 100).toFixed(0) + '%')})</div>`;
       
       marker.addEventListener('click', (e) => {
         e.stopPropagation();
-        state.currentTime = displayProg * state.durationSec;
+        if (state.trimMode === 'slice') {
+          state.currentTime = renderer.trimIn * state.durationSec + arrivalSec;
+        } else {
+          state.currentTime = arrivalSec;
+        }
         updateTimeDisplay();
         if (!state.isPlaying) renderer.render();
       });
@@ -3634,6 +3733,7 @@ document.addEventListener('DOMContentLoaded', () => {
       offRenderer.trimMode = state.trimMode;
       offRenderer.waypointOffsetSec = renderer.waypointOffsetSec;
       offRenderer.waypointDurationSec = renderer.waypointDurationSec;
+      offRenderer.progressTable = updateSpeedProgressTable();
 
       // 2B. Pre-cache all required map tiles if background map is enabled
       if (offRenderer.toggles.bgMap && offRenderer.mapStyle !== 'vector') {
@@ -3664,36 +3764,14 @@ document.addEventListener('DOMContentLoaded', () => {
       let lastFpsFrame = 0;
       let currentFps = 0;
 
-      // Pre-compute progress lookup table integrating speed ramp curve
-      const progressTable = [];
-      const totalSteps = 2000;
-      const speedDt = [];
-      let totalIntegratedTime = 0;
-      for (let s = 0; s < totalSteps; s++) {
-        const u = s / (totalSteps - 1);
-        const spd = Math.max(0.15, Math.min(10.0, getSpeedAtProgress(u)));
-        const dt = (1.0 / totalSteps) / spd;
-        speedDt.push(dt);
-        totalIntegratedTime += dt;
-      }
-
-      for (let i = 0; i < totalExportFrames; i++) {
-        const tNorm = i / (totalExportFrames - 1 || 1);
-        const targetTime = tNorm * totalIntegratedTime;
-        let accum = 0;
-        let u = 1.0;
-        for (let s = 0; s < totalSteps; s++) {
-          accum += speedDt[s];
-          if (accum >= targetTime) {
-            u = s / (totalSteps - 1);
-            break;
-          }
-        }
-        progressTable.push(u);
-      }
+      // Speed integration progress lookup table
+      const progressTable = offRenderer.progressTable || updateSpeedProgressTable();
+      const clipDur = (state.trimMode === 'slice')
+        ? Math.max(0.5, (offRenderer.trimOut - offRenderer.trimIn) * state.durationSec)
+        : state.durationSec;
 
       // Pre-warm camera position & heading at start of export to eliminate initial damping shock
-      const firstProg = offRenderer.trimIn + progressTable[0] * (offRenderer.trimOut - offRenderer.trimIn);
+      const firstProg = offRenderer.trimIn + lookupProgressFromTable(progressTable, 0) * (offRenderer.trimOut - offRenderer.trimIn);
       const firstInterp = offRenderer.getTrackInterpolationAtProgress ? offRenderer.getTrackInterpolationAtProgress(firstProg) : null;
       if (firstInterp) {
         const p0 = firstInterp.p0;
@@ -3720,12 +3798,14 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        const u = progressTable[i];
+        const tNorm = i / (totalExportFrames - 1 || 1);
+        const u = lookupProgressFromTable(progressTable, tNorm);
         offRenderer.progress = offRenderer.trimIn + u * (offRenderer.trimOut - offRenderer.trimIn);
+        offRenderer.currentClipTime = tNorm * clipDur;
         if (state.trimMode === 'fit') {
-          offRenderer.currentTime = (i / (totalExportFrames - 1 || 1)) * state.durationSec;
+          offRenderer.currentTime = tNorm * state.durationSec;
         } else {
-          offRenderer.currentTime = (offRenderer.trimIn + u * (offRenderer.trimOut - offRenderer.trimIn)) * state.durationSec;
+          offRenderer.currentTime = offRenderer.trimIn * state.durationSec + offRenderer.currentClipTime;
         }
         await offRenderer.renderFrameForExport(1.0 / chosenFps);
 
@@ -4262,15 +4342,9 @@ document.addEventListener('DOMContentLoaded', () => {
       ctx.fillText(`${zVal.toFixed(1)}x`, 6, y - 3);
     });
 
-    // Playhead cursor (normalized to active clip progress)
-    let clipP;
-    if (state.trimMode === 'fit') {
-      clipP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-    } else {
-      const tSpan = Math.max(0.0001, renderer.trimOut - renderer.trimIn);
-      const curP = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-      clipP = Math.max(0, Math.min(1, (curP - renderer.trimIn) / tSpan));
-    }
+    // Playhead cursor (normalized to active clip progress u)
+    const tSpan = Math.max(0.0001, renderer.trimOut - renderer.trimIn);
+    const clipP = Math.max(0, Math.min(1, (renderer.progress - renderer.trimIn) / tSpan));
     const curX = toX(clipP);
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
@@ -5392,6 +5466,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // START STUDIO
+  updateSpeedProgressTable();
   loadProjects().then(() => {
     requestAnimationFrame(animationLoop);
   });

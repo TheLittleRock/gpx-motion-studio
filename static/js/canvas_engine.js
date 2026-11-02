@@ -820,7 +820,7 @@ class CanvasRenderer {
     }
   }
 
-  // --- DYNAMIC SLIPPY TILE ENGINE (SMOOTH CROSS-FADE TILE ZOOM) ---
+  // --- DYNAMIC SLIPPY TILE ENGINE (SMOOTH CONTINUOUS TILE ZOOM) ---
   drawSlippyMap(ctx, centerMercX, centerMercY, zoomFractional, viewportW, viewportH, offsetX = 0, offsetY = 0) {
     if (!this.tileCache) this.tileCache = new Map();
     const provider = this.tileProvider || 'mapy_outdoor';
@@ -828,9 +828,9 @@ class CanvasRenderer {
     const zClamped = Math.max(6, Math.min(18, zoomFractional));
     const zBase = Math.floor(zClamped);
     const zNext = Math.min(18, zBase + 1);
-    const blendAlpha = zClamped - zBase; // 0.0 to 1.0
+    const frac = zClamped - zBase; // 0.0 to 1.0
 
-    const renderLevel = (z, alpha) => {
+    const renderLevel = (z, alpha, isOverlay = false) => {
       if (alpha <= 0.01) return;
       const n = Math.pow(2, z);
       const scaleFactor = Math.pow(2, zClamped - z);
@@ -847,7 +847,7 @@ class CanvasRenderer {
       const maxY = Math.floor((centerY + halfH) / 256) + 1;
 
       ctx.save();
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = Math.min(1.0, Math.max(0.0, alpha));
 
       for (let x = minX; x <= maxX; x++) {
         for (let y = minY; y <= maxY; y++) {
@@ -897,7 +897,7 @@ class CanvasRenderer {
 
           if (entry.loaded) {
             ctx.drawImage(entry.img, screenX, screenY, screenW, screenH);
-          } else if (alpha >= 0.95) {
+          } else if (alpha >= 0.95 && !isOverlay) {
             ctx.fillStyle = '#0f131a';
             ctx.fillRect(screenX, screenY, screenW, screenH);
           }
@@ -906,20 +906,25 @@ class CanvasRenderer {
       ctx.restore();
     };
 
-    // Single Integer Zoom Level with Continuous Canvas Scaling — GUARANTEED zero tile ghosting
-    const targetZ = Math.max(6, Math.min(18, Math.round(zClamped)));
-    renderLevel(targetZ, 1.0);
+    // Smooth Continuous LOD Tile Rendering (Zero jumping, zero black flashing, zero ghosting)
+    if (frac < 0.45 || zNext === zBase) {
+      renderLevel(zBase, 1.0, false);
+    } else if (frac >= 0.85) {
+      renderLevel(zNext, 1.0, false);
+    } else {
+      // Transition window [0.45, 0.85]: zBase at 100% solid underlay, zNext eases in on top
+      const t = (frac - 0.45) / 0.40;
+      const smoothAlpha = t * t * (3 - 2 * t);
+      renderLevel(zBase, 1.0, false);
+      renderLevel(zNext, smoothAlpha, true);
+    }
   }
 
   mercToScreenTiles(mx, my, centerMercX, centerMercY, zoomFractional, viewportW, viewportH) {
-    const z = Math.max(6, Math.min(18, Math.round(zoomFractional)));
-    const n = Math.pow(2, z);
-    const scaleFactor = Math.pow(2, zoomFractional - z);
-    const centerX = centerMercX * n * 256;
-    const centerY = centerMercY * n * 256;
+    const scale = Math.pow(2, zoomFractional) * 256;
     return {
-      x: (mx * n * 256 - centerX) * scaleFactor + viewportW / 2,
-      y: (my * n * 256 - centerY) * scaleFactor + viewportH / 2
+      x: (mx - centerMercX) * scale + viewportW / 2,
+      y: (my - centerMercY) * scale + viewportH / 2
     };
   }
 
@@ -3145,6 +3150,50 @@ class CanvasRenderer {
     return bestIdx;
   }
 
+  // --- WAYPOINT ARRIVAL TIME (SPEED RAMPING & TRIM AWARE) ---
+  getWaypointArrivalTimeSec(wp) {
+    if (!this.gpxData || !this.gpxData.points || this.gpxData.points.length === 0) return null;
+    const pts = this.gpxData.points;
+    const n = pts.length;
+    const totalDist = (this.gpxData && this.gpxData.total_distance_km) || (pts[n - 1] && pts[n - 1].dist_km) || 100;
+
+    let wpDist = (wp.dist_km !== undefined && wp.dist_km !== null) ? Number(wp.dist_km) : null;
+    if (wpDist === null) {
+      const trackIdx = this.getWaypointTrackIndex(wp);
+      wpDist = (pts[trackIdx] && pts[trackIdx].dist_km) || 0;
+    }
+
+    const distProg = Math.max(0, Math.min(1, wpDist / totalDist));
+    const tSpan = Math.max(0.0001, this.trimOut - this.trimIn);
+    const u_wp = (distProg - this.trimIn) / tSpan;
+
+    // Check if waypoint is outside active trimmed clip
+    if (u_wp < -0.02 || u_wp > 1.02) return null;
+
+    const clipDuration = (this.trimMode === 'slice')
+      ? Math.max(0.5, (this.trimOut - this.trimIn) * (this.durationSec || 10.0))
+      : (this.durationSec || 10.0);
+
+    // If speed progressTable is available, evaluate exact arrival frame
+    if (this.progressTable && this.progressTable.length > 1) {
+      const tbl = this.progressTable;
+      let low = 0, high = tbl.length - 1;
+      while (low <= high) {
+        const mid = (low + high) >> 1;
+        if (tbl[mid] < u_wp) low = mid + 1;
+        else high = mid - 1;
+      }
+      const i0 = Math.max(0, Math.min(tbl.length - 2, high));
+      const i1 = i0 + 1;
+      const u0 = tbl[i0], u1 = tbl[i1];
+      const frac = (u1 > u0) ? Math.max(0, Math.min(1, (u_wp - u0) / (u1 - u0))) : 0;
+      const normT = (i0 + frac) / (tbl.length - 1);
+      return normT * clipDuration;
+    }
+
+    return u_wp * clipDuration;
+  }
+
   // --- WAYPOINT CALLOUTS (TOLERANCE, OFFSET & DURATION AWARE) ---
   drawActiveWaypointCallout(progress) {
     if (!this.waypoints || this.waypoints.length === 0) return;
@@ -3152,12 +3201,26 @@ class CanvasRenderer {
 
     const s = this.hudScale;
     const totalDuration = this.durationSec || 10.0;
-    const pts = this.gpxData.points;
-    const n = pts.length;
+    const clipDuration = (this.trimMode === 'slice')
+      ? Math.max(0.5, (this.trimOut - this.trimIn) * totalDuration)
+      : totalDuration;
 
-    // Current animation time in seconds
-    const curProg = (progress !== undefined) ? progress : this.progress;
-    const currentSec = (this.currentTime !== undefined) ? this.currentTime : (curProg * totalDuration);
+    // Video playhead time in seconds relative to the active clip
+    let currentClipSec;
+    if (this.currentClipTime !== undefined) {
+      currentClipSec = this.currentClipTime;
+    } else if (this.currentTime !== undefined) {
+      if (this.trimMode === 'slice') {
+        currentClipSec = Math.max(0, Math.min(clipDuration, this.currentTime - this.trimIn * totalDuration));
+      } else {
+        currentClipSec = this.currentTime;
+      }
+    } else {
+      const curProg = (progress !== undefined) ? progress : this.progress;
+      const tSpan = Math.max(0.0001, this.trimOut - this.trimIn);
+      const u = Math.max(0, Math.min(1, (curProg - this.trimIn) / tSpan));
+      currentClipSec = u * clipDuration;
+    }
 
     const globalOffsetSec = (this.waypointOffsetSec !== undefined) ? Number(this.waypointOffsetSec) : 0.0;
     const globalDurationSec = (this.waypointDurationSec !== undefined) ? Number(this.waypointDurationSec) : 3.0;
@@ -3166,32 +3229,11 @@ class CanvasRenderer {
     let factor = 0;
     let bestCloseness = Infinity;
 
-    const totalDist = (this.gpxData && this.gpxData.total_distance_km) || (pts[n - 1] && pts[n - 1].dist_km) || 100;
-
     for (const wp of this.waypoints) {
       if (wp.showBanner === false) continue;
 
-      let wpDist = (wp.dist_km !== undefined && wp.dist_km !== null) ? Number(wp.dist_km) : null;
-      if (wpDist === null) {
-        const trackIdx = this.getWaypointTrackIndex(wp);
-        wpDist = (pts[trackIdx] && pts[trackIdx].dist_km) || 0;
-      }
-
-      const distProg = Math.max(0, Math.min(1, wpDist / totalDist));
-
-      let normProg;
-      if (this.trimMode === 'fit') {
-        const tRange = Math.max(0.0001, this.trimOut - this.trimIn);
-        normProg = (distProg - this.trimIn) / tRange;
-      } else {
-        normProg = distProg;
-      }
-
-      // If waypoint is outside trimmed route, suppress callout
-      if (normProg < -0.05 || normProg > 1.05) continue;
-
-      // Expected arrival time in animation seconds
-      const arrivalSec = normProg * totalDuration;
+      const arrivalSec = this.getWaypointArrivalTimeSec(wp);
+      if (arrivalSec === null) continue;
 
       // Waypoint specific or global timing offset and duration
       const wpOffset = (wp.offset_sec !== undefined && wp.offset_sec !== null) ? Number(wp.offset_sec) : globalOffsetSec;
@@ -3201,10 +3243,10 @@ class CanvasRenderer {
       const windowStart = arrivalSec - (wpDur * 0.35) + wpOffset;
       const windowEnd = windowStart + wpDur;
 
-      if (currentSec >= windowStart && currentSec <= windowEnd && wpDur > 0) {
-        const rel = (currentSec - windowStart) / wpDur; // 0.0 to 1.0
+      if (currentClipSec >= windowStart && currentClipSec <= windowEnd && wpDur > 0) {
+        const rel = (currentClipSec - windowStart) / wpDur; // 0.0 to 1.0
         const currentFactor = Math.sin(rel * Math.PI);
-        const distToCenter = Math.abs(currentSec - (windowStart + wpDur * 0.5));
+        const distToCenter = Math.abs(currentClipSec - (windowStart + wpDur * 0.5));
 
         if (distToCenter < bestCloseness) {
           bestCloseness = distToCenter;
@@ -3222,40 +3264,42 @@ class CanvasRenderer {
     ctx.shadowBlur = 0;
     ctx.globalAlpha = Math.min(1.0, factor * 1.5);
 
-    const slideOffset = (1.0 - factor) * 35;
-    const cardX = 40;
-    const cardY = 145 + slideOffset;
-    const cardW = 390 * s;
-    const cardH = 72 * s;
+    const layout = this.getWidgetLayout('telemetry');
+    const telemScale = this.hudScale * layout.scale;
+    const slideOffset = (1.0 - factor) * 25;
+    const cardX = layout.x;
+    const cardY = layout.y + layout.h * telemScale + 12 * telemScale + slideOffset;
+    const cardW = layout.w * telemScale;
+    const cardH = 72 * telemScale;
 
     // Glass Card
     ctx.fillStyle = this.colors.cardBg;
     ctx.strokeStyle = this.colors.finishMarker;
-    ctx.lineWidth = 1.8 * s;
-    this.roundRect(ctx, cardX, cardY, cardW, cardH, 12 * s);
+    ctx.lineWidth = 1.8 * telemScale;
+    this.roundRect(ctx, cardX, cardY, cardW, cardH, 12 * telemScale);
     ctx.fill();
     ctx.stroke();
 
     // Accent Left Glow
     ctx.fillStyle = this.colors.finishMarker;
-    this.roundRect(ctx, cardX, cardY, 5 * s, cardH, 2.5 * s);
+    this.roundRect(ctx, cardX, cardY, 5 * telemScale, cardH, 2.5 * telemScale);
     ctx.fill();
 
     // Category Icon
-    const iconMap = { summit: '⛰️', coffee: '☕', flag: '🚩', finish: '🏁', sprint: '⚡', castle: '🏰' };
+    const iconMap = { summit: '⛰️', coffee: '☕', flag: '🚩', finish: '🏁', sprint: '⚡', castle: '🏰', bus_stop: '🚏', cinema: '🎬', culture: '🏛️', town: '🏘️', city: '🏙️' };
     const iconChar = iconMap[activeWp.category || activeWp.icon] || '📍';
-    ctx.font = `${22 * s}px sans-serif`;
-    ctx.fillText(iconChar, cardX + 16 * s, cardY + 44 * s);
+    ctx.font = `${22 * telemScale}px sans-serif`;
+    ctx.fillText(iconChar, cardX + 16 * telemScale, cardY + 44 * telemScale);
 
     // Title & Subtitle
     ctx.fillStyle = '#ffffff';
-    ctx.font = `700 ${15 * s}px Inter, sans-serif`;
+    ctx.font = `700 ${15 * telemScale}px Inter, sans-serif`;
     ctx.textAlign = 'left';
-    ctx.fillText(activeWp.title, cardX + 54 * s, cardY + 32 * s);
+    ctx.fillText(activeWp.title, cardX + 54 * telemScale, cardY + 32 * telemScale);
 
     ctx.fillStyle = this.colors.textDim;
-    ctx.font = `500 ${11.5 * s}px Inter, sans-serif`;
-    ctx.fillText(activeWp.subtitle, cardX + 54 * s, cardY + 52 * s);
+    ctx.font = `500 ${11.5 * telemScale}px Inter, sans-serif`;
+    ctx.fillText(activeWp.subtitle || activeWp.desc || '', cardX + 54 * telemScale, cardY + 52 * telemScale);
 
     ctx.restore();
   }
