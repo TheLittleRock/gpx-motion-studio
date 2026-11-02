@@ -208,7 +208,18 @@ class ProjectDatabase:
             if not row:
                 return None
             proj = dict(row)
-            proj["settings"] = json.loads(proj["settings_json"]) if proj["settings_json"] else {}
+            settings = json.loads(proj["settings_json"]) if proj["settings_json"] else {}
+            
+            # Sanitize legacy spotlight zoomLevel (< 10.0 was old camera scale, which caused zoom out)
+            if "spotlight" in settings and isinstance(settings["spotlight"], dict):
+                sp = settings["spotlight"]
+                if sp.get("zoomLevel", 16.0) < 10.0:
+                    sp["zoomLevel"] = 16.0
+                    sp["startZoom"] = 8.0
+                    sp["direction"] = "in"
+                    # Auto-update in DB
+                    cursor.execute("UPDATE projects SET settings_json = ? WHERE id = ?", (json.dumps(settings), project_id))
+            proj["settings"] = settings
             
             # Fetch waypoints
             cursor.execute("SELECT * FROM waypoints WHERE project_id = ? ORDER BY progress ASC", (project_id,))

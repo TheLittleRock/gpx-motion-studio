@@ -80,6 +80,7 @@
             <option value="hud" selected>📊 HUD</option>
             <option value="flyover">🚁 Přelet</option>
             <option value="fullscreen">🗺️ Celá trasa</option>
+            <option value="split">📐 Celá trasa (Boční split)</option>
             <option value="spotlight">🔍 Spotlight</option>
           </select>
         </div>
@@ -95,6 +96,9 @@
         </div>
 
         <div class="viewport-tools">
+          <button class="tool-btn" id="btnToggleLayersDrawer" title="Vrstvy a jednotlivé prvky mapy (Řeky, Přehrady, Obce, Památky, Silnice)">
+            🗂️ Vrstvy & Prvky
+          </button>
           <div class="zoom-controls-group">
             <button class="tool-btn" id="btnZoomOutView" title="Oddálit pohled (až 0.2x)">−</button>
             <button class="tool-btn" id="btnResetViewportZoom" title="Resetovat na 100%">100%</button>
@@ -108,6 +112,9 @@
           <button class="tool-btn active" id="btnToggleChecker" title="Přepnout mřížku pro průhlednost (Alpha)">
             🏁 Mřížka
           </button>
+          <button class="tool-btn" id="btnFullscreenPreview" title="Celá obrazovka (F)">
+            ⛶
+          </button>
           <button class="tool-btn" id="btnResetView" title="Resetovat transformaci">
             🔍 Reset
           </button>
@@ -117,6 +124,32 @@
       <!-- CANVAS CONTAINER -->
       <div class="canvas-container checkerboard-bg" id="canvasContainer">
         <canvas id="renderCanvas" width="1920" height="1080"></canvas>
+
+        <!-- FLOATING LAYERS & FEATURES DRAWER -->
+        <div class="floating-layers-drawer" id="floatingLayersDrawer" style="display:none;">
+          <div class="layers-drawer-header">
+            <div class="layers-drawer-title">
+              <span>🗂️ Vrstvy & Prvky Vektorové Mapy</span>
+              <span class="layers-drawer-sub">Individuální zapnutí a vypnutí libovolného toku, obce, památky či silnice</span>
+            </div>
+            <button class="layers-close-btn" id="btnCloseLayersDrawer" title="Zavřít">✕</button>
+          </div>
+          <div class="layers-drawer-toolbar">
+            <input type="text" id="layersSearchInput" class="form-input layers-search" placeholder="Hledat prvek (např. Vltava, Slapy, Tábor)...">
+            <div class="layers-filter-tabs">
+              <button class="layers-tab active" data-tab="all">Vše</button>
+              <button class="layers-tab" data-tab="rivers">Řeky</button>
+              <button class="layers-tab" data-tab="lakes">Přehrady</button>
+              <button class="layers-tab" data-tab="places">Obce</button>
+              <button class="layers-tab" data-tab="landmarks">Památky</button>
+              <button class="layers-tab" data-tab="roads">Silnice</button>
+            </div>
+          </div>
+          <div class="layers-items-list" id="layersItemsContainer">
+            <!-- Dynamically populated from renderer.vectorLayers -->
+          </div>
+        </div>
+
         <div class="calibration-banner" id="calibrationBanner">
           <span id="calibrationStepText">🎯 Krok 1: Klikněte na START trasy na mapě</span>
           <button class="btn btn-secondary" id="btnCancelCalibration" style="padding:2px 8px; font-size:10px;">Zrušit</button>
@@ -389,10 +422,22 @@
           <div class="form-group">
             <div class="form-label"><span>Vzhled ikon (žádné terče)</span></div>
             <select id="markerStyleSelect" class="tool-btn" style="width:100%; height:30px; background:var(--bg-input);">
-              <option value="pill" selected>Sleek Glass Pilulka (např. [ START • Praha ])</option>
+              <option value="dot" selected>Minimalistický bod + záře (Čistý minimalistický text)</option>
+              <option value="hairline">Vlásečnicová linka (Hairline)</option>
+              <option value="glass_pill">Ultra tenká skleněná pilulka (1px Glass)</option>
+              <option value="pill">Klasická pilulka (Sleek Box)</option>
               <option value="pin">Klasický špendlík (Teardrop Pin)</option>
-              <option value="ring">Zářící neonový kruh (Glowing Ring)</option>
             </select>
+          </div>
+          <div style="display:flex; gap:10px; margin-bottom:8px;">
+            <div class="toggle-item" style="flex:1; margin-bottom:0; padding:4px 8px; background:var(--bg-panel); border-radius:4px;">
+              <span style="font-size:10.5px; font-weight:600;">Zobrazit START</span>
+              <label class="toggle-switch"><input type="checkbox" id="toggleStartMarker" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="toggle-item" style="flex:1; margin-bottom:0; padding:4px 8px; background:var(--bg-panel); border-radius:4px;">
+              <span style="font-size:10.5px; font-weight:600;">Zobrazit CÍL</span>
+              <label class="toggle-switch"><input type="checkbox" id="toggleFinishMarker" checked><span class="toggle-slider"></span></label>
+            </div>
           </div>
           <div style="display:flex; gap:10px; margin-bottom:12px;">
             <div class="form-group" style="flex:1; margin-bottom:0;">
@@ -584,6 +629,10 @@
             <div class="form-group" style="margin:2px 0 8px 0;">
               <div class="form-label" style="font-size:10px;"><span>Krytí řek na pozadí</span><span class="form-val" id="lodRiverOpacityVal">35%</span></div>
               <input type="range" class="form-range" id="lodRiverOpacitySlider" min="5" max="100" value="35">
+            </div>
+            <div class="form-group" style="margin:2px 0 8px 0;">
+              <div class="form-label" style="font-size:10px;"><span>Členitost a meandry (Geometrie)</span><span class="form-val" id="lodMeandersVal">4 / 5</span></div>
+              <input type="range" class="form-range" id="lodMeandersSlider" min="1" max="5" step="1" value="4" title="1: Nízkopolygonální přímky, 3: Základní křivky, 5: Plné organické meandry">
             </div>
 
             <!-- Roads & Paths -->

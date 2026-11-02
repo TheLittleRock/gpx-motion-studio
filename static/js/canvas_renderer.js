@@ -117,8 +117,12 @@ class CanvasRenderer {
       villagesVisible: true,
       colorVillages: '#94a3b8',
       landmarksVisible: true,
-      colorLandmarks: '#38bdf8'
+      colorLandmarks: '#38bdf8',
+      meanders: 4
     };
+
+    // Disabled features set (for individual element toggle drawer)
+    this.disabledFeatures = new Set();
 
     // Zoom Ramp Curve & 4 Broadcast Presets
     this.zoomKeyframes = [
@@ -142,8 +146,9 @@ class CanvasRenderer {
     this.dotSize = 8;
     this.hudScale = 1.0;
     
-    // Marker Style for Start & Finish (Pill, Pin, Ring — no target crosshairs!)
-    this.markerStyle = 'pill'; // 'pill' (Glass Badge), 'pin' (Teardrop), 'ring' (Neon Circle)
+    // Marker Style for Start & Finish (Minimalist Dot, Hairline, Glass Pill, Pill)
+    this.startFinishStyle = 'dot';
+    this.markerStyle = 'dot';
     this.startCityName = 'Praha';
     this.finishCityName = 'České Budějovice';
     
@@ -157,7 +162,9 @@ class CanvasRenderer {
       bgMap: true,
       rivers: true,
       landmarks: true,
-      clock: false
+      clock: false,
+      startMarker: true,
+      finishMarker: true
     };
     
     // Telemetry 3-Slot Modular Configuration (Default Czech)
@@ -282,6 +289,42 @@ class CanvasRenderer {
 
   setVectorLayers(layers) {
     this.vectorLayers = layers;
+    if (layers) {
+      if (layers.rivers) {
+        layers.rivers.forEach((r, idx) => { if (!r.id) r.id = 'river_' + (r.name ? r.name.toLowerCase().replace(/\s+/g, '_') : idx); });
+      }
+      if (layers.lakes_dams) {
+        layers.lakes_dams.forEach((l, idx) => { if (!l.id) l.id = 'dam_' + (l.name ? l.name.toLowerCase().replace(/\s+/g, '_') : idx); });
+      }
+      if (layers.places) {
+        layers.places.forEach((p, idx) => { if (!p.id) p.id = 'place_' + (p.name ? p.name.toLowerCase().replace(/\s+/g, '_') : idx); });
+      }
+      if (layers.landmarks) {
+        layers.landmarks.forEach((m, idx) => { if (!m.id) m.id = 'landmark_' + (m.name ? m.name.toLowerCase().replace(/\s+/g, '_') : idx); });
+      }
+      if (layers.motorways) {
+        layers.motorways.forEach((r, idx) => { if (!r.id) r.id = 'road_m_' + (r.name ? r.name.toLowerCase().replace(/\s+/g, '_') : idx); });
+      }
+      if (layers.primary_roads) {
+        layers.primary_roads.forEach((r, idx) => { if (!r.id) r.id = 'road_p_' + (r.name ? r.name.toLowerCase().replace(/\s+/g, '_') : idx); });
+      }
+    }
+  }
+
+  isFeatureVisible(featureId) {
+    if (!featureId) return true;
+    if (this.disabledFeatures) {
+      if (this.disabledFeatures instanceof Set) {
+        return !this.disabledFeatures.has(featureId);
+      }
+      if (Array.isArray(this.disabledFeatures)) {
+        return !this.disabledFeatures.includes(featureId);
+      }
+      if (typeof this.disabledFeatures === 'object') {
+        return !this.disabledFeatures[featureId];
+      }
+    }
+    return true;
   }
 
   setRivers(rivers) {
@@ -532,7 +575,7 @@ class CanvasRenderer {
     const currentMercX = p0.merc_x + (p1.merc_x - p0.merc_x) * interp;
     const currentMercY = p0.merc_y + (p1.merc_y - p0.merc_y) * interp;
 
-    // Switch between the 4 Animation Modes
+    // Switch between Animation Modes
     switch (this.animationMode) {
       case 'hud':
         this.renderModeHUD(idx0, interp, currentMercX, currentMercY, effectiveProgress, currentDist, currentEle, currentGrade);
@@ -542,6 +585,9 @@ class CanvasRenderer {
         break;
       case 'fullscreen':
         this.renderModeFullscreenRoute(idx0, interp, currentMercX, currentMercY, effectiveProgress, currentDist, currentEle);
+        break;
+      case 'split':
+        this.renderModeSplitRoute(idx0, interp, currentMercX, currentMercY, effectiveProgress, currentDist, currentEle, currentGrade);
         break;
       case 'spotlight':
         this.renderModeSpotlight(effectiveProgress);
@@ -557,57 +603,77 @@ class CanvasRenderer {
     }
   }
 
-  // --- DYNAMIC SLIPPY TILE ENGINE ---
+  // --- DYNAMIC SLIPPY TILE ENGINE (SMOOTH CROSS-FADE TILE ZOOM) ---
   drawSlippyMap(ctx, centerMercX, centerMercY, zoomFractional, viewportW, viewportH, offsetX = 0, offsetY = 0) {
     if (!this.tileCache) this.tileCache = new Map();
     const provider = this.tileProvider || 'mapy_outdoor';
-    const z = Math.max(6, Math.min(18, Math.round(zoomFractional)));
-    const n = Math.pow(2, z);
-    const scaleFactor = Math.pow(2, zoomFractional - z);
 
-    const centerX = centerMercX * n * 256;
-    const centerY = centerMercY * n * 256;
+    const zClamped = Math.max(6, Math.min(18, zoomFractional));
+    const zBase = Math.floor(zClamped);
+    const zNext = Math.min(18, zBase + 1);
+    const blendAlpha = zClamped - zBase; // 0.0 to 1.0
 
-    const halfW = (viewportW / 2) / scaleFactor;
-    const halfH = (viewportH / 2) / scaleFactor;
+    const renderLevel = (z, alpha) => {
+      if (alpha <= 0.01) return;
+      const n = Math.pow(2, z);
+      const scaleFactor = Math.pow(2, zClamped - z);
 
-    const minX = Math.floor((centerX - halfW) / 256) - 1;
-    const maxX = Math.floor((centerX + halfW) / 256) + 1;
-    const minY = Math.floor((centerY - halfH) / 256) - 1;
-    const maxY = Math.floor((centerY + halfH) / 256) + 1;
+      const centerX = centerMercX * n * 256;
+      const centerY = centerMercY * n * 256;
 
-    for (let x = minX; x <= maxX; x++) {
-      for (let y = minY; y <= maxY; y++) {
-        if (x < 0 || x >= n || y < 0 || y >= n) continue;
-        const key = `${provider}_${z}_${x}_${y}`;
-        let entry = this.tileCache.get(key);
-        if (!entry) {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          entry = { img, loaded: false };
-          this.tileCache.set(key, entry);
-          img.onload = () => {
-            entry.loaded = true;
-            if (typeof this.onTileLoaded === 'function') {
-              this.onTileLoaded();
-            }
-          };
-          img.onerror = () => { entry.error = true; };
-          img.src = `/api/tiles/${provider}/${z}/${x}/${y}`;
-        }
+      const halfW = (viewportW / 2) / scaleFactor;
+      const halfH = (viewportH / 2) / scaleFactor;
 
-        const screenX = (x * 256 - centerX) * scaleFactor + viewportW / 2 + offsetX;
-        const screenY = (y * 256 - centerY) * scaleFactor + viewportH / 2 + offsetY;
-        const screenW = Math.ceil(256 * scaleFactor) + 1;
-        const screenH = Math.ceil(256 * scaleFactor) + 1;
+      const minX = Math.floor((centerX - halfW) / 256) - 1;
+      const maxX = Math.floor((centerX + halfW) / 256) + 1;
+      const minY = Math.floor((centerY - halfH) / 256) - 1;
+      const maxY = Math.floor((centerY + halfH) / 256) + 1;
 
-        if (entry.loaded) {
-          ctx.drawImage(entry.img, screenX, screenY, screenW, screenH);
-        } else {
-          ctx.fillStyle = '#0f131a';
-          ctx.fillRect(screenX, screenY, screenW, screenH);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      for (let x = minX; x <= maxX; x++) {
+        for (let y = minY; y <= maxY; y++) {
+          if (x < 0 || x >= n || y < 0 || y >= n) continue;
+          const key = `${provider}_${z}_${x}_${y}`;
+          let entry = this.tileCache.get(key);
+          if (!entry) {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            entry = { img, loaded: false };
+            this.tileCache.set(key, entry);
+            img.onload = () => {
+              entry.loaded = true;
+              if (typeof this.onTileLoaded === 'function') {
+                this.onTileLoaded();
+              }
+            };
+            img.onerror = () => { entry.error = true; };
+            img.src = `/api/tiles/${provider}/${z}/${x}/${y}`;
+          }
+
+          const screenX = (x * 256 - centerX) * scaleFactor + viewportW / 2 + offsetX;
+          const screenY = (y * 256 - centerY) * scaleFactor + viewportH / 2 + offsetY;
+          const screenW = Math.ceil(256 * scaleFactor) + 1;
+          const screenH = Math.ceil(256 * scaleFactor) + 1;
+
+          if (entry.loaded) {
+            ctx.drawImage(entry.img, screenX, screenY, screenW, screenH);
+          } else if (alpha >= 0.95) {
+            ctx.fillStyle = '#0f131a';
+            ctx.fillRect(screenX, screenY, screenW, screenH);
+          }
         }
       }
+      ctx.restore();
+    };
+
+    // 1. Draw base integer zoom layer
+    renderLevel(zBase, 1.0);
+
+    // 2. Cross-fade higher-detail layer if transitioning between zoom steps
+    if (zNext > zBase && blendAlpha > 0.05) {
+      renderLevel(zNext, blendAlpha);
     }
   }
 
@@ -682,6 +748,7 @@ class CanvasRenderer {
     const layers = this.vectorLayers;
     const s = this.hudScale;
     const density = (this.lod && this.lod.density !== undefined) ? this.lod.density : 3;
+    const meandersLOD = (this.lod && this.lod.meanders !== undefined) ? this.lod.meanders : 4;
 
     // 1. Water Bodies: Lakes & Dams
     if (this.lod && this.lod.lakes_dams !== false && layers.lakes_dams) {
@@ -690,6 +757,7 @@ class CanvasRenderer {
       ctx.strokeStyle = this.hexToRgba(this.colors.river || '#38bdf8', Math.min(1.0, lakesOpacity + 0.2));
       ctx.lineWidth = 1.2 * s;
       for (const l of layers.lakes_dams) {
+        if (l.id && !this.isFeatureVisible(l.id)) continue;
         if (!l.points || l.points.length < 3) continue;
         ctx.beginPath();
         for (let i = 0; i < l.points.length; i++) {
@@ -703,7 +771,7 @@ class CanvasRenderer {
       }
     }
 
-    // 2. Rivers (Soft background, single draw, configurable opacity & width & rank)
+    // 2. Rivers (Soft background, single draw, configurable opacity, width, rank & meander geometry)
     if (this.lod && this.lod.rivers !== false && layers.rivers) {
       const rOpacity = (this.lod && this.lod.riverOpacity !== undefined) ? this.lod.riverOpacity : 0.35;
       const rWidth = (this.lod && this.lod.riverWidth !== undefined) ? this.lod.riverWidth : 2.5;
@@ -714,11 +782,21 @@ class CanvasRenderer {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       for (const r of layers.rivers) {
-        if (!r.points || r.points.length < 2) continue;
+        if (r.id && !this.isFeatureVisible(r.id)) continue;
         if (r.rank && r.rank > filterRank) continue;
+        if (!r.points || r.points.length < 2) continue;
+
+        // Subsample river points if meander geometry LOD is set low (1 = straight line segments)
+        let pts = r.points;
+        if (meandersLOD === 1) {
+          pts = pts.filter((_, idx) => idx === 0 || idx === pts.length - 1 || idx % 4 === 0);
+        } else if (meandersLOD === 2) {
+          pts = pts.filter((_, idx) => idx === 0 || idx === pts.length - 1 || idx % 2 === 0);
+        }
+
         ctx.beginPath();
-        for (let i = 0; i < r.points.length; i++) {
-          const pt = toScreen(r.points[i].mx, r.points[i].my);
+        for (let i = 0; i < pts.length; i++) {
+          const pt = toScreen(pts[i].mx, pts[i].my);
           if (i === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         }
@@ -726,12 +804,13 @@ class CanvasRenderer {
       }
     }
 
-    // 3. Urban Areas
-    if (layers.urban_areas) {
+    // 3. Urban Areas (Only if explicitly enabled and non-empty)
+    if (this.lod && this.lod.urbanAreas && layers.urban_areas && layers.urban_areas.length > 0) {
       ctx.fillStyle = 'rgba(28, 35, 48, 0.45)';
       ctx.strokeStyle = 'rgba(55, 68, 90, 0.55)';
       ctx.lineWidth = 1;
       for (const u of layers.urban_areas) {
+        if (u.id && !this.isFeatureVisible(u.id)) continue;
         if (!u.points || u.points.length < 3) continue;
         ctx.beginPath();
         for (let i = 0; i < u.points.length; i++) {
@@ -748,6 +827,7 @@ class CanvasRenderer {
     // 4. Motorways (Dual Casing)
     if (this.lod && this.lod.motorways !== false && layers.motorways) {
       for (const m of layers.motorways) {
+        if (m.id && !this.isFeatureVisible(m.id)) continue;
         if (!m.points || m.points.length < 2) continue;
         ctx.beginPath();
         for (let i = 0; i < m.points.length; i++) {
@@ -770,6 +850,7 @@ class CanvasRenderer {
       ctx.strokeStyle = 'rgba(148, 163, 184, 0.65)';
       ctx.lineWidth = 2.5 * s;
       for (const pr of layers.primary_roads) {
+        if (pr.id && !this.isFeatureVisible(pr.id)) continue;
         if (!pr.points || pr.points.length < 2) continue;
         ctx.beginPath();
         for (let i = 0; i < pr.points.length; i++) {
@@ -786,6 +867,7 @@ class CanvasRenderer {
       ctx.strokeStyle = 'rgba(100, 116, 139, 0.45)';
       ctx.lineWidth = 1.5 * s;
       for (const lr of layers.local_roads) {
+        if (lr.id && !this.isFeatureVisible(lr.id)) continue;
         if (!lr.points || lr.points.length < 2) continue;
         ctx.beginPath();
         for (let i = 0; i < lr.points.length; i++) {
@@ -803,6 +885,7 @@ class CanvasRenderer {
       ctx.lineWidth = 1.8 * s;
       ctx.setLineDash([4 * s, 4 * s]);
       for (const pa of layers.paths) {
+        if (pa.id && !this.isFeatureVisible(pa.id)) continue;
         if (!pa.points || pa.points.length < 2) continue;
         ctx.beginPath();
         for (let i = 0; i < pa.points.length; i++) {
@@ -818,6 +901,7 @@ class CanvasRenderer {
     // 8. Settlements & Towns (Governed by LOD density slider & category toggles)
     if (this.lod && this.lod.settlements !== false && layers.places) {
       for (const pl of layers.places) {
+        if (pl.id && !this.isFeatureVisible(pl.id)) continue;
         if (pl.rank > density) continue;
         if (pl.rank === 1 && this.lod.citiesVisible === false) continue;
         if (pl.rank === 2 && this.lod.townsVisible === false) continue;
@@ -831,6 +915,7 @@ class CanvasRenderer {
     // 9. Landmarks (Castles, Peaks, Viewpoints)
     if (this.lod && this.lod.landmarksVisible !== false && layers.landmarks) {
       for (const lm of layers.landmarks) {
+        if (lm.id && !this.isFeatureVisible(lm.id)) continue;
         const pt = toScreen(lm.mx, lm.my);
         this.drawCityLabel(ctx, pt.x, pt.y, lm.name, 2, s, lm.category || 'castle');
       }
@@ -994,14 +1079,18 @@ class CanvasRenderer {
     ctx.restore();
 
     // 5. Start Marker
-    const startPt = toScreen(points[0].merc_x, points[0].merc_y);
-    const isAtStart = progress <= 0.02;
-    this.drawStartFinishMarker(ctx, startPt.x, startPt.y, `START • ${this.startCityName}`, this.colors.startMarker, isAtStart);
+    if (this.toggles.startMarker !== false) {
+      const startPt = toScreen(points[0].merc_x, points[0].merc_y);
+      const isAtStart = progress <= 0.02;
+      this.drawStartFinishMarker(ctx, startPt.x, startPt.y, `START • ${this.startCityName}`, this.colors.startMarker, isAtStart);
+    }
 
     // 6. Finish Marker
-    const finishPt = toScreen(points[n - 1].merc_x, points[n - 1].merc_y);
-    const isFinished = progress >= 0.98;
-    this.drawStartFinishMarker(ctx, finishPt.x, finishPt.y, `CÍL • ${this.finishCityName}`, this.colors.finishMarker, isFinished);
+    if (this.toggles.finishMarker !== false) {
+      const finishPt = toScreen(points[n - 1].merc_x, points[n - 1].merc_y);
+      const isFinished = progress >= 0.98;
+      this.drawStartFinishMarker(ctx, finishPt.x, finishPt.y, `CÍL • ${this.finishCityName}`, this.colors.finishMarker, isFinished);
+    }
 
     // 7. En-Route Milestone Badges
     if (this.toggles.landmarks && this.landmarks) {
@@ -1070,6 +1159,174 @@ class CanvasRenderer {
     ctx.restore();
   }
 
+  // --- MODE 5: CELÁ TRASA (BOČNÍ SPLIT) ---
+  renderModeSplitRoute(idx0, interp, curMercX, curMercY, progress, dist, ele, grade) {
+    const ctx = this.ctx;
+    const w = this.width;
+    const h = this.height;
+    const s = this.hudScale;
+
+    ctx.save();
+
+    // 0. Optional Backdrop Image (Drone photo / custom background)
+    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : null;
+    if (bgImg) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));
+      const scale = Math.max(w / bgImg.width, h / bgImg.height);
+      const drawW = bgImg.width * scale;
+      const drawH = bgImg.height * scale;
+      ctx.drawImage(bgImg, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+      ctx.restore();
+    }
+
+    // Framing: Route is on the right side (45% to 100% of viewport width)
+    const b = this.gpxData.bounds;
+    const spanX = (b.max_mx - b.min_mx) || 0.0005;
+    const spanY = (b.max_my - b.min_my) || 0.0005;
+    const centerMx = (b.min_mx + b.max_mx) / 2;
+    const centerMy = (b.min_my + b.max_my) / 2;
+
+    const usableW = w * 0.48;
+    const usableH = h * 0.76;
+    const zx = Math.log2(usableW / (spanX * 256));
+    const zy = Math.log2(usableH / (spanY * 256));
+    const fitZoom = Math.min(zx, zy);
+    const vZoom = Math.max(0.15, Math.min(5.0, this.viewportZoom || 1.0));
+    const currentZoom = Math.max(6, Math.min(18, fitZoom + Math.log2(vZoom)));
+
+    const mapCenterX = w * 0.72;
+    const mapCenterY = h * 0.50;
+    const panX = (this.viewportPan && this.viewportPan.x) || 0;
+    const panY = (this.viewportPan && this.viewportPan.y) || 0;
+
+    const toScreen = (mx, my) => {
+      const zInt = Math.max(6, Math.min(18, Math.round(currentZoom)));
+      const n = Math.pow(2, zInt);
+      const scaleFactor = Math.pow(2, currentZoom - zInt);
+      return {
+        x: (mx * n * 256 - centerMx * n * 256) * scaleFactor + mapCenterX + panX,
+        y: (my * n * 256 - centerMy * n * 256) * scaleFactor + mapCenterY + panY
+      };
+    };
+
+    // 1. Background Map for right area (if toggles.bgMap)
+    if (this.toggles.bgMap) {
+      if (this.mapStyle === 'vector') {
+        if (!bgImg && this.vectorTheme === 'dark') {
+          ctx.fillStyle = 'rgba(15, 17, 21, 0.75)';
+          ctx.fillRect(w * 0.44, 0, w * 0.56, h);
+        }
+        if (this.vectorLayers) {
+          this.drawLODLayers(ctx, toScreen);
+        }
+      } else {
+        // Slippy Mapy.com tiles offset to right
+        this.drawSlippyMap(ctx, centerMx, centerMy, currentZoom, w, h, (mapCenterX - w / 2) + panX, (mapCenterY - h / 2) + panY);
+        if (this.mapLoaded && this.mapImage && (!this.tileCache || this.tileCache.size === 0)) {
+          ctx.save();
+          const scale = Math.max(w * 0.55 / this.mapImage.width, h / this.mapImage.height);
+          const drawW = this.mapImage.width * scale;
+          const drawH = this.mapImage.height * scale;
+          ctx.drawImage(this.mapImage, mapCenterX - drawW / 2 + panX, mapCenterY - drawH / 2 + panY, drawW, drawH);
+          ctx.restore();
+        }
+        ctx.fillStyle = 'rgba(10, 14, 20, 0.35)';
+        ctx.fillRect(w * 0.44, 0, w * 0.56, h);
+      }
+    }
+
+    // 2. Full Route Underlay (Smoothed)
+    const points = this.getSmoothedPoints();
+    const n = points.length;
+
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const pt = toScreen(points[i].merc_x, points[i].merc_y);
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.strokeStyle = this.colors.trail;
+    ctx.lineWidth = Math.max(3, this.lineWidth * 0.8 * s);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // 3. Active Animated Glowing Trail
+    ctx.save();
+    if (this.colors.glowIntensity > 0) {
+      ctx.shadowColor = this.colors.path;
+      ctx.shadowBlur = this.colors.glowIntensity * 10 * s;
+    }
+    ctx.beginPath();
+    const startIdx = Math.floor(this.trimIn * (n - 1));
+    for (let i = startIdx; i <= idx0; i++) {
+      const pt = toScreen(points[i].merc_x, points[i].merc_y);
+      if (i === startIdx) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    const currentTip = toScreen(curMercX, curMercY);
+    ctx.lineTo(currentTip.x, currentTip.y);
+    ctx.strokeStyle = this.colors.path;
+    ctx.lineWidth = Math.max(4, this.lineWidth * 1.2 * s);
+    ctx.stroke();
+    ctx.restore();
+
+    // 4. Start Marker
+    if (this.toggles.startMarker !== false) {
+      const startPt = toScreen(points[0].merc_x, points[0].merc_y);
+      const isAtStart = progress <= 0.02;
+      this.drawStartFinishMarker(ctx, startPt.x, startPt.y, `START • ${this.startCityName}`, this.colors.startMarker, isAtStart);
+    }
+
+    // 5. Finish Marker
+    if (this.toggles.finishMarker !== false) {
+      const finishPt = toScreen(points[n - 1].merc_x, points[n - 1].merc_y);
+      const isFinished = progress >= 0.98;
+      this.drawStartFinishMarker(ctx, finishPt.x, finishPt.y, `CÍL • ${this.finishCityName}`, this.colors.finishMarker, isFinished);
+    }
+
+    // 6. En-Route Milestone Badges
+    if (this.toggles.landmarks && this.landmarks) {
+      for (const lm of this.landmarks) {
+        if (lm.id && !this.isFeatureVisible(lm.id)) continue;
+        const mxmy = this.latLonToMercator(lm.lat, lm.lon);
+        if (mxmy.x >= b.min_mx && mxmy.x <= b.max_mx && mxmy.y >= b.min_my && mxmy.y <= b.max_my) {
+          const lPt = toScreen(mxmy.x, mxmy.y);
+          this.drawLandmarkLabel(ctx, lPt.x, lPt.y, lm.name, lm.category, s);
+        }
+      }
+    }
+
+    // 7. Custom Waypoint Pins on route
+    if (this.toggles.waypoints && this.waypoints) {
+      for (const wp of this.waypoints) {
+        const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.dist_km || 0) / (points[n - 1].dist_km || 1)) * (n - 1))));
+        const wpPt = toScreen(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        this.drawWaypointRoutePin(ctx, wpPt.x, wpPt.y, wp, s);
+      }
+    }
+
+    // 8. Moving Rider Beacon
+    if (this.toggles.riderDot) {
+      this.drawPulsingRiderDot(ctx, currentTip.x, currentTip.y, s);
+    }
+
+    // 9. Left Side Stack: Telemetry HUD, Elevation Profile, Waypoint Banner, Clock
+    if (this.toggles.telemetry) {
+      this.drawTelemetryStats(dist, ele, grade);
+    }
+    if (this.toggles.elevation) {
+      this.drawElevationProfile(progress, dist, ele, grade);
+    }
+    this.drawActiveWaypointCallout(progress);
+    if (this.toggles.clock) {
+      this.drawClockOverlay(progress);
+    }
+
+    ctx.restore();
+  }
+
   // --- MODE 4: LOCATION SPOTLIGHT / ZOOM-IN ---
   renderModeSpotlight(progress) {
     const ctx = this.ctx;
@@ -1103,9 +1360,22 @@ class CanvasRenderer {
       rebound = Math.sin(rt * Math.PI) * 0.10; // 10% subtle rebound push
     }
 
-    const startZoom = (this.spotlight && this.spotlight.startZoom) || 8.0;
-    const targetZoom = (this.spotlight && this.spotlight.zoomLevel) || 16.0;
+    let startZoom = (this.spotlight && this.spotlight.startZoom) || 8.0;
+    let targetZoom = (this.spotlight && this.spotlight.zoomLevel) || 16.0;
     const isZoomIn = !this.spotlight || this.spotlight.direction !== 'out';
+
+    // Enforce zoom direction guard: Zoom In ALWAYS moves from overview into detail
+    if (isZoomIn) {
+      const zMin = Math.min(startZoom, targetZoom);
+      const zMax = Math.max(startZoom, targetZoom);
+      startZoom = zMin;
+      targetZoom = Math.max(zMin + 3.0, zMax);
+    } else {
+      const zMin = Math.min(startZoom, targetZoom);
+      const zMax = Math.max(startZoom, targetZoom);
+      startZoom = zMax;
+      targetZoom = zMin;
+    }
 
     // In Zoom In mode: starts at wide overview (startZoom) and dives down into detailed target (targetZoom)
     const zoomRange = targetZoom - startZoom;
@@ -1188,11 +1458,11 @@ class CanvasRenderer {
     ctx.fillStyle = '#ffffff';
     ctx.font = `800 ${14 * s}px Inter, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText(`🔍 ${this.spotlight.targetName}`, cardX + cardW / 2, cardY + 28 * s);
+    ctx.fillText(`🔍 ${(this.spotlight && this.spotlight.targetName) || 'Zaměřené místo'}`, cardX + cardW / 2, cardY + 28 * s);
 
     ctx.fillStyle = this.colors.textDim;
     ctx.font = `600 ${11 * s}px JetBrains Mono`;
-    ctx.fillText(`${this.spotlight.targetLat.toFixed(5)}°N, ${this.spotlight.targetLon.toFixed(5)}°E • Detail ${currentZoom.toFixed(1)}x`, cardX + cardW / 2, cardY + 50 * s);
+    ctx.fillText(`${targetLat.toFixed(5)}°N, ${targetLon.toFixed(5)}°E • Detail ${currentZoom.toFixed(1)}x`, cardX + cardW / 2, cardY + 50 * s);
   }
 
   // --- STYLE B: TRANSPARENT VECTOR MAP RENDERER ---
@@ -1339,9 +1609,10 @@ class CanvasRenderer {
     }
   }
 
-  // --- START & FINISH MARKERS (NO TARGET CROSSHAIRS) ---
+  // --- START & FINISH MARKERS (MINIMALIST & SLEEK) ---
   drawStartFinishMarker(ctx, x, y, label, colorHex, isPulsing = false) {
     const s = this.hudScale;
+    const style = this.startFinishStyle || this.markerStyle || 'dot';
 
     ctx.save();
 
@@ -1352,17 +1623,98 @@ class CanvasRenderer {
       ctx.strokeStyle = this.hexToRgba(colorHex, (1.0 - p1) * 0.9);
       ctx.lineWidth = 2 * s;
       ctx.beginPath();
-      ctx.arc(x, y, (12 + p1 * 26) * s, 0, Math.PI * 2);
+      ctx.arc(x, y, (10 + p1 * 24) * s, 0, Math.PI * 2);
       ctx.stroke();
 
       ctx.strokeStyle = this.hexToRgba(colorHex, (1.0 - p2) * 0.9);
       ctx.beginPath();
-      ctx.arc(x, y, (12 + p2 * 26) * s, 0, Math.PI * 2);
+      ctx.arc(x, y, (10 + p2 * 24) * s, 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    if (this.markerStyle === 'pill') {
-      // Sleek Glass Pill Badge
+    if (style === 'dot') {
+      // 1. Minimalist Luminous Dot + Clean Typography (No bulky box)
+      ctx.save();
+      // Outer subtle glow
+      ctx.shadowColor = colorHex;
+      ctx.shadowBlur = 10 * s;
+      ctx.fillStyle = colorHex;
+      ctx.beginPath();
+      ctx.arc(x, y, 5.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner crisp white core
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Clean typography with deep drop-shadow
+      ctx.font = `800 ${11.5 * s}px Inter, sans-serif`;
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+      ctx.shadowBlur = 5 * s;
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, x + 10 * s, y);
+      ctx.restore();
+    } else if (style === 'hairline') {
+      // 2. Minimalist Hairline Whisker + Elegant Text
+      ctx.save();
+      ctx.strokeStyle = colorHex;
+      ctx.lineWidth = 1.2 * s;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y - 20 * s);
+      ctx.lineTo(x + 14 * s, y - 20 * s);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, 3 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.font = `700 ${10.5 * s}px Inter, sans-serif`;
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+      ctx.shadowBlur = 4 * s;
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, x + 18 * s, y - 20 * s);
+      ctx.restore();
+    } else if (style === 'glass_pill') {
+      // 3. Ultra-thin 1px Translucent Glass Pill
+      ctx.font = `700 ${10.5 * s}px Inter, sans-serif`;
+      const textW = ctx.measureText(label).width;
+      const pillW = textW + 24 * s;
+      const pillH = 20 * s;
+      const pillX = x - pillW / 2;
+      const pillY = y - pillH - 10 * s;
+
+      ctx.fillStyle = 'rgba(15, 20, 30, 0.55)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.lineWidth = 1 * s;
+      this.roundRect(ctx, pillX, pillY, pillW, pillH, 10 * s);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = colorHex;
+      ctx.beginPath();
+      ctx.arc(pillX + 10 * s, pillY + pillH / 2, 3 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, pillX + 18 * s, pillY + pillH / 2);
+
+      // Pin dot on route
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, 3.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (style === 'pill') {
+      // 4. Sleek Glass Pill Badge (Legacy)
       ctx.font = `800 ${11 * s}px Inter, sans-serif`;
       const textW = ctx.measureText(label).width;
       const pillW = textW + 28 * s;
@@ -1370,10 +1722,8 @@ class CanvasRenderer {
       const pillX = x - pillW / 2;
       const pillY = y - pillH - 12 * s;
 
-      // Smart collision placement
       this.collisionResolver.place(pillX, pillY, pillW, pillH);
 
-      // Glass Background
       ctx.fillStyle = 'rgba(15, 18, 24, 0.92)';
       ctx.strokeStyle = colorHex;
       ctx.lineWidth = 1.5 * s;
@@ -1381,18 +1731,15 @@ class CanvasRenderer {
       ctx.fill();
       ctx.stroke();
 
-      // Colored Indicator Dot
       ctx.fillStyle = colorHex;
       ctx.beginPath();
       ctx.arc(pillX + 13 * s, pillY + pillH / 2, 4 * s, 0, Math.PI * 2);
       ctx.fill();
 
-      // Label Text
       ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'left';
       ctx.fillText(label, pillX + 22 * s, pillY + 17 * s);
 
-      // Center Pin Dot
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(x, y, 4.5 * s, 0, Math.PI * 2);
@@ -1402,8 +1749,8 @@ class CanvasRenderer {
       ctx.beginPath();
       ctx.arc(x, y, 2.5 * s, 0, Math.PI * 2);
       ctx.fill();
-    } else if (this.markerStyle === 'pin') {
-      // Classic Modern Teardrop Pin
+    } else if (style === 'pin') {
+      // 5. Classic Modern Teardrop Pin
       const pinH = 34 * s;
       ctx.fillStyle = colorHex;
       ctx.beginPath();
@@ -1569,31 +1916,49 @@ class CanvasRenderer {
     ctx.fill();
     ctx.stroke();
 
+    // Dedicated Header Bar with Separator Line (No overflow / No misalignment)
     ctx.save();
-    this.roundRect(ctx, boxX + 4, boxY + 4, boxW - 8, boxH - 8, 12 * s);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = this.colors.textDim;
+    ctx.font = `700 ${10 * s}px Inter, sans-serif`;
+    ctx.fillText("MINIMAPA TRASY", boxX + 16 * s, boxY + 16 * s);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 1 * s;
+    ctx.beginPath();
+    ctx.moveTo(boxX + 12 * s, boxY + 28 * s);
+    ctx.lineTo(boxX + boxW - 12 * s, boxY + 28 * s);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    this.roundRect(ctx, boxX + 4, boxY + 30 * s, boxW - 8, boxH - 34 * s, 12 * s);
     ctx.clip();
 
     const b = this.gpxData.bounds;
     const spanX = (b.max_mx - b.min_mx) || 0.001;
     const spanY = (b.max_my - b.min_my) || 0.001;
 
-    const mapInnerPad = 26 * s;
+    const mapInnerPad = 22 * s;
     const mapDrawW = boxW - mapInnerPad * 2;
-    const mapDrawH = boxH - mapInnerPad * 2;
+    const mapDrawH = boxH - 36 * s - mapInnerPad * 2;
 
     const scale = Math.min(mapDrawW / spanX, mapDrawH / spanY);
     const offsetX = boxX + mapInnerPad + (mapDrawW - spanX * scale) / 2;
-    const offsetY = boxY + mapInnerPad + (mapDrawH - spanY * scale) / 2;
+    const offsetY = boxY + 32 * s + mapInnerPad + (mapDrawH - spanY * scale) / 2;
 
     const toMiniMap = (mx, my) => ({
       x: offsetX + (mx - b.min_mx) * scale,
       y: offsetY + (my - b.min_my) * scale
     });
 
-    // 1. Water Bodies: Lakes & Dams on Minimap
+    // 1. Water Bodies: Lakes & Dams on Minimap (Soft Background)
     if (this.lod && this.lod.lakes_dams !== false && this.vectorLayers && this.vectorLayers.lakes_dams) {
-      ctx.fillStyle = this.hexToRgba(this.colors.river || '#38bdf8', (this.lod.lakesOpacity || 0.35) * 0.8);
+      const lakesOpacity = ((this.lod && this.lod.lakesOpacity !== undefined) ? this.lod.lakesOpacity : 0.35) * 0.7;
+      ctx.fillStyle = this.hexToRgba(this.colors.river || '#38bdf8', lakesOpacity);
       for (const l of this.vectorLayers.lakes_dams) {
+        if (l.id && !this.isFeatureVisible(l.id)) continue;
         if (!l.points || l.points.length < 3) continue;
         ctx.beginPath();
         for (let i = 0; i < l.points.length; i++) {
@@ -1606,15 +1971,24 @@ class CanvasRenderer {
       }
     }
 
-    // 2. Rivers
-    if (this.toggles.rivers && this.rivers) {
-      ctx.strokeStyle = this.colors.river;
-      ctx.lineWidth = Math.max(2, 2.5 * s);
-      for (const river of this.rivers) {
-        if (!river.coordinates) continue;
+    // 2. Rivers on Minimap (Soft Background, respecting LOD opacity & width & rank)
+    if (this.toggles.rivers && this.vectorLayers && this.vectorLayers.rivers) {
+      const filterRank = (this.lod && this.lod.riverFilterRank !== undefined) ? this.lod.riverFilterRank : 3;
+      const rOpacity = ((this.lod && this.lod.riverOpacity !== undefined) ? this.lod.riverOpacity : 0.35) * 0.65;
+      const rWidth = Math.max(1.0, ((this.lod && this.lod.riverWidth) || 2.5) * 0.45 * s);
+
+      ctx.strokeStyle = this.hexToRgba(this.colors.river || '#38bdf8', rOpacity);
+      ctx.lineWidth = rWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      for (const river of this.vectorLayers.rivers) {
+        if (river.id && !this.isFeatureVisible(river.id)) continue;
+        if (river.rank && river.rank > filterRank) continue;
+        if (!river.points || river.points.length < 2) continue;
         ctx.beginPath();
-        for (let i = 0; i < river.coordinates.length; i++) {
-          const pt = toMiniMap(river.coordinates[i].mx, river.coordinates[i].my);
+        for (let i = 0; i < river.points.length; i++) {
+          const pt = toMiniMap(river.points[i].mx, river.points[i].my);
           if (i === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         }
@@ -1626,9 +2000,10 @@ class CanvasRenderer {
     if (this.vectorLayers && this.vectorLayers.places && this.lod && this.lod.settlements !== false) {
       const density = (this.lod && this.lod.density !== undefined) ? this.lod.density : 3;
       for (const pl of this.vectorLayers.places) {
+        if (pl.id && !this.isFeatureVisible(pl.id)) continue;
         if (pl.rank > Math.min(3, density)) continue;
         const pt = toMiniMap(pl.mx, pl.my);
-        if (pt.x < boxX + 6 || pt.x > boxX + boxW - 6 || pt.y < boxY + 6 || pt.y > boxY + boxH - 6) continue;
+        if (pt.x < boxX + 6 || pt.x > boxX + boxW - 6 || pt.y < boxY + 32 * s || pt.y > boxY + boxH - 6) continue;
         
         ctx.save();
         ctx.fillStyle = pl.rank === 1 ? ((this.lod && this.lod.colorCities) || '#ffffff') : ((this.lod && this.lod.colorTowns) || '#cbd5e1');
@@ -1683,20 +2058,57 @@ class CanvasRenderer {
     ctx.stroke();
     ctx.restore();
 
-    // 6. Waypoints Pins on Minimap
+    // 6. Waypoints Pins & Labels on Minimap (Added user points and corridor landmarks)
     if (this.toggles.waypoints && this.waypoints) {
       for (const wp of this.waypoints) {
+        if (wp.id && !this.isFeatureVisible(wp.id)) continue;
         const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.dist_km || 0) / (points[n - 1].dist_km || 1)) * (n - 1))));
         const pt = toMiniMap(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        if (pt.x < boxX + 6 || pt.x > boxX + boxW - 6 || pt.y < boxY + 32 * s || pt.y > boxY + boxH - 6) continue;
+
         ctx.save();
         ctx.fillStyle = '#f59e0b';
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1 * s;
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 2.8 * s, 0, Math.PI * 2);
+        ctx.arc(pt.x, pt.y, 3 * s, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
+
+        ctx.font = `700 ${7.5 * s}px Inter, sans-serif`;
+        ctx.fillStyle = '#f0f6fc';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+        ctx.shadowBlur = 3 * s;
+        ctx.fillText(wp.title, pt.x, pt.y - 3.5 * s);
         ctx.restore();
+      }
+    }
+
+    // 6B. Corridor Landmarks on Minimap
+    if (this.toggles.landmarks && this.landmarks) {
+      for (const lm of this.landmarks) {
+        if (lm.id && !this.isFeatureVisible(lm.id)) continue;
+        const mxmy = this.latLonToMercator(lm.lat, lm.lon);
+        if (mxmy.x >= b.min_mx && mxmy.x <= b.max_mx && mxmy.y >= b.min_my && mxmy.y <= b.max_my) {
+          const pt = toMiniMap(mxmy.x, mxmy.y);
+          if (pt.x < boxX + 6 || pt.x > boxX + boxW - 6 || pt.y < boxY + 32 * s || pt.y > boxY + boxH - 6) continue;
+          ctx.save();
+          ctx.fillStyle = '#38bdf8';
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 2.2 * s, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.font = `600 ${7.0 * s}px Inter, sans-serif`;
+          ctx.fillStyle = '#cbd5e1';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.shadowColor = 'rgba(0,0,0,0.95)';
+          ctx.shadowBlur = 3 * s;
+          ctx.fillText(lm.name, pt.x, pt.y - 2.5 * s);
+          ctx.restore();
+        }
       }
     }
 
@@ -1706,16 +2118,6 @@ class CanvasRenderer {
     }
 
     ctx.restore(); // clip
-
-    // Header label - strictly left-aligned with card
-    ctx.save();
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = this.colors.textDim;
-    ctx.font = `700 ${10 * s}px Inter, sans-serif`;
-    ctx.fillText("MINIMAPA TRASY", boxX + 16 * s, boxY + 22 * s);
-    ctx.restore();
-
     ctx.restore();
   }
 
@@ -1859,6 +2261,10 @@ class CanvasRenderer {
   }
 
   // --- TELEMETRY STATS (TABULAR NUMBERS & ZERO OVERLAP) ---
+  drawTelemetryDashboard(progress, distKm, eleM, gradePct) {
+    return this.drawTelemetryStats(distKm, eleM, gradePct);
+  }
+
   drawTelemetryStats(distKm, eleM, gradePct) {
     const ctx = this.ctx;
     const layout = this.getWidgetLayout('telemetry');
@@ -1882,18 +2288,25 @@ class CanvasRenderer {
     // Header label - strictly left-aligned with card
     ctx.save();
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = this.colors.textDim;
     ctx.font = `700 ${9.5 * s}px Inter, sans-serif`;
-    ctx.fillText("TELEMETRIE JÍZDY", cardX + 18 * s, cardY + 22 * s);
+    ctx.fillText("TELEMETRIE JÍZDY", cardX + 18 * s, cardY + 16 * s);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 1 * s;
+    ctx.beginPath();
+    ctx.moveTo(cardX + 12 * s, cardY + 26 * s);
+    ctx.lineTo(cardX + cardW - 12 * s, cardY + 26 * s);
+    ctx.stroke();
     ctx.restore();
 
     const colW = (cardW - 36 * s) / 3;
 
     // Render each slot with guaranteed non-overlapping typography
-    this.drawTelemetrySlot(ctx, cardX + 18 * s, cardY + 36 * s, colW, this.telemetry.slot1, distKm, eleM, gradePct, s);
-    this.drawTelemetrySlot(ctx, cardX + 18 * s + colW, cardY + 36 * s, colW, this.telemetry.slot2, distKm, eleM, gradePct, s);
-    this.drawTelemetrySlot(ctx, cardX + 18 * s + colW * 2, cardY + 36 * s, colW, this.telemetry.slot3, distKm, eleM, gradePct, s);
+    this.drawTelemetrySlot(ctx, cardX + 18 * s, cardY + 32 * s, colW, this.telemetry.slot1, distKm, eleM, gradePct, s);
+    this.drawTelemetrySlot(ctx, cardX + 18 * s + colW, cardY + 32 * s, colW, this.telemetry.slot2, distKm, eleM, gradePct, s);
+    this.drawTelemetrySlot(ctx, cardX + 18 * s + colW * 2, cardY + 32 * s, colW, this.telemetry.slot3, distKm, eleM, gradePct, s);
 
     ctx.restore();
   }
@@ -2001,6 +2414,7 @@ class CanvasRenderer {
     let factor = 0;
 
     for (const wp of this.waypoints) {
+      if (wp.showBanner === false) continue;
       const durProgress = wp.duration_progress || 0.04;
       const diff = progress - wp.progress;
       if (diff >= -0.01 && diff <= durProgress) {

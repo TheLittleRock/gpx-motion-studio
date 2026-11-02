@@ -661,22 +661,215 @@ body {
 
 .timeline-waypoint-marker {
   position: absolute;
-  top: 3px;
+  top: 4px;
   width: 10px;
   height: 10px;
-  border-radius: 50%;
-  background: var(--accent-cyan);
-  border: 1.5px solid #fff;
-  transform: translateX(-50%);
+  background: #f59e0b;
+  border: 1.5px solid #ffffff;
+  transform: translateX(-50%) rotate(45deg);
   z-index: 7;
-  box-shadow: 0 0 6px var(--accent-cyan);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.85);
   pointer-events: auto;
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, background 0.15s ease;
 }
 
 .timeline-waypoint-marker:hover {
-  transform: translateX(-50%) scale(1.35);
+  transform: translateX(-50%) rotate(45deg) scale(1.4);
+  background: var(--accent-cyan);
+  box-shadow: 0 0 8px var(--accent-cyan);
+}
+
+.timeline-waypoint-marker.active {
+  background: var(--accent-cyan);
+  border-color: #ffffff;
+  box-shadow: 0 0 10px var(--accent-cyan);
+}
+
+.timeline-wp-tooltip {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 14, 20, 0.95);
+  border: 1px solid var(--border-color);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+}
+
+.timeline-waypoint-marker:hover .timeline-wp-tooltip {
+  opacity: 1;
+}
+
+/* FLOATING LAYERS & FEATURES DRAWER */
+.floating-layers-drawer {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 360px;
+  max-height: calc(100% - 32px);
+  background: rgba(15, 18, 24, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fadeInDown 0.18s ease-out;
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.layers-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(20, 24, 32, 0.8);
+}
+
+.layers-drawer-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.layers-drawer-title span:first-child {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.layers-drawer-sub {
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.layers-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.layers-close-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.layers-drawer-toolbar {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.layers-search {
+  width: 100%;
+  height: 26px;
+  font-size: 11px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0 8px;
+  color: #fff;
+}
+
+.layers-filter-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.layers-tab {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.layers-tab.active, .layers-tab:hover {
+  background: var(--bg-card);
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+.layers-items-list {
+  padding: 8px 12px;
+  overflow-y: auto;
+  max-height: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layers-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  font-size: 11px;
+  transition: background 0.15s;
+}
+
+.layers-item-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.layers-item-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layers-item-badge {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-cyan);
+}
+
+/* FULLSCREEN CANVAS FIX */
+#canvasContainer:fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+#canvasContainer:fullscreen #renderCanvas {
+  max-width: 100vw;
+  max-height: 100vh;
+  object-fit: contain;
 }
 
 /* RIGHT INSPECTOR PANEL (400px, NON-WRAPPING TABS) */

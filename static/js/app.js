@@ -37,11 +37,14 @@ document.addEventListener('DOMContentLoaded', () => {
       description,
       colors: JSON.parse(JSON.stringify(renderer.colors)),
       hudScale: renderer.hudScale,
+      lineWidth: renderer.lineWidth,
       hudLayout: JSON.parse(JSON.stringify(renderer.hudLayout)),
       toggles: JSON.parse(JSON.stringify(renderer.toggles)),
       lod: JSON.parse(JSON.stringify(renderer.lod || {})),
       mapStyle: renderer.mapStyle,
       animationMode: renderer.animationMode,
+      startFinishStyle: renderer.startFinishStyle || renderer.markerStyle || 'dot',
+      disabledFeatures: Array.from(renderer.disabledFeatures || []),
       trimIn: renderer.trimIn,
       trimOut: renderer.trimOut,
       trimMode: state.trimMode,
@@ -79,9 +82,52 @@ document.addEventListener('DOMContentLoaded', () => {
       if (hudScaleSlider) hudScaleSlider.value = s.hudScale;
       if (hudScaleVal) hudScaleVal.textContent = `${s.hudScale.toFixed(2)}x`;
     }
+    if (s.lineWidth) {
+      renderer.lineWidth = s.lineWidth;
+      if (lineWidthSlider) lineWidthSlider.value = s.lineWidth;
+      if (lineWidthVal) lineWidthVal.textContent = `${s.lineWidth}px`;
+    }
     if (s.hudLayout) renderer.hudLayout = JSON.parse(JSON.stringify(s.hudLayout));
-    if (s.toggles) renderer.toggles = JSON.parse(JSON.stringify(s.toggles));
-    if (s.lod) renderer.lod = JSON.parse(JSON.stringify(s.lod));
+    if (s.toggles) {
+      renderer.toggles = JSON.parse(JSON.stringify(s.toggles));
+      if (toggleMiniMap) toggleMiniMap.checked = renderer.toggles.miniMap !== false;
+      if (toggleElevation) toggleElevation.checked = renderer.toggles.elevation !== false;
+      if (toggleStats) toggleStats.checked = renderer.toggles.telemetry !== false;
+      if (toggleClock) toggleClock.checked = Boolean(renderer.toggles.clock);
+      if (toggleRivers) toggleRivers.checked = renderer.toggles.rivers !== false;
+      if (toggleWaypoints) toggleWaypoints.checked = renderer.toggles.waypoints !== false;
+      if (toggleRiderDot) toggleRiderDot.checked = renderer.toggles.riderDot !== false;
+      if (toggleBgMap) toggleBgMap.checked = renderer.toggles.bgMap !== false;
+      const tStart = document.getElementById('toggleStartMarker');
+      const tFin = document.getElementById('toggleFinishMarker');
+      if (tStart) tStart.checked = renderer.toggles.startMarker !== false;
+      if (tFin) tFin.checked = renderer.toggles.finishMarker !== false;
+    }
+    if (s.startFinishStyle) {
+      renderer.startFinishStyle = s.startFinishStyle;
+      renderer.markerStyle = s.startFinishStyle;
+      const mSel = document.getElementById('markerStyleSelect');
+      if (mSel) mSel.value = s.startFinishStyle;
+    }
+    if (s.disabledFeatures) {
+      renderer.disabledFeatures = new Set(s.disabledFeatures);
+      if (typeof populateLayersDrawer === 'function') populateLayersDrawer();
+    }
+    if (s.lod) {
+      renderer.lod = JSON.parse(JSON.stringify(s.lod));
+      const dens = document.getElementById('lodDensitySlider');
+      const densVal = document.getElementById('lodDensityVal');
+      if (dens && s.lod.density !== undefined) { dens.value = s.lod.density; if (densVal) densVal.textContent = `${s.lod.density} / 5`; }
+      const meand = document.getElementById('lodMeandersSlider');
+      const meandVal = document.getElementById('lodMeandersVal');
+      if (meand && s.lod.meanders !== undefined) { meand.value = s.lod.meanders; if (meandVal) meandVal.textContent = `${s.lod.meanders} / 5`; }
+      const rOp = document.getElementById('lodRiverOpacitySlider');
+      const rOpVal = document.getElementById('lodRiverOpacityVal');
+      if (rOp && s.lod.riverOpacity !== undefined) { rOp.value = Math.round(s.lod.riverOpacity * 100); if (rOpVal) rOpVal.textContent = `${rOp.value}%`; }
+      const rW = document.getElementById('lodRiversWidthSlider');
+      const rWVal = document.getElementById('lodRiversWidthVal');
+      if (rW && s.lod.riverWidth !== undefined) { rW.value = s.lod.riverWidth; if (rWVal) rWVal.textContent = `${s.lod.riverWidth}px`; }
+    }
     if (s.mapStyle) {
       renderer.mapStyle = s.mapStyle;
       if (btnStylePanorama) btnStylePanorama.classList.toggle('active', s.mapStyle === 'panorama');
@@ -168,6 +214,32 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnRedo = document.getElementById('btnRedo');
   if (btnUndo) btnUndo.addEventListener('click', undo);
   if (btnRedo) btnRedo.addEventListener('click', redo);
+
+  // Global atomic undo history tracking on all interactive controls:
+  let pendingUndoState = null;
+
+  document.addEventListener('pointerdown', (e) => {
+    const el = e.target;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT')) {
+      if (!pendingUndoState) {
+        pendingUndoState = captureCurrentState('Změna ' + (el.id || el.name || el.type));
+      }
+    }
+  }, true);
+
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'SELECT')) {
+      if (pendingUndoState) {
+        undoStack.push(pendingUndoState);
+        if (undoStack.length > MAX_HISTORY) undoStack.shift();
+        redoStack.length = 0;
+        pendingUndoState = null;
+      }
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    }
+  }, true);
 
   // Bezier Speed Ramp Keyframes (Progress: 0.0 to 1.0, Speed: 0.25x to 6.0x)
   let speedKeyframes = [
@@ -811,6 +883,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await resp.json();
       if (data.layers) {
         renderer.setVectorLayers(data.layers);
+        if (typeof populateLayersDrawer === 'function') populateLayersDrawer();
         if (!state.isPlaying) renderer.render();
         showToast('✓ Vektorové vrstvy mapy načteny');
       }
@@ -1121,6 +1194,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       loadRiversAndLandmarks();
+      loadVectorLayers();
 
       const metaResp = await fetch('/api/map/metadata');
       const mapMeta = await metaResp.json();
@@ -2402,25 +2476,46 @@ document.addEventListener('DOMContentLoaded', () => {
     waypointsListContainer.innerHTML = '';
     const wps = renderer.waypoints || [];
 
+    if (wps.length === 0) {
+      waypointsListContainer.innerHTML = '<div style="font-size:10.5px; color:var(--text-dim); padding:6px 0;">Žádné aktivní body na trase.</div>';
+      return;
+    }
+
     wps.forEach((wp, idx) => {
       const card = document.createElement('div');
       card.className = 'waypoint-card';
+      const showBanner = wp.showBanner !== false;
       card.innerHTML = `
-        <div class="waypoint-info">
-          <div class="waypoint-title-text">${wp.title}</div>
-          <div class="waypoint-sub-text">${wp.subtitle} • ${(wp.progress * 100).toFixed(0)}%</div>
+        <div class="waypoint-info" style="flex:1;">
+          <div class="waypoint-title-text" style="font-weight:700; color:#fff;">${wp.title}</div>
+          <div class="waypoint-sub-text" style="font-size:10px; color:var(--text-muted);">${wp.subtitle || ''} • ${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : ((wp.progress * 100).toFixed(0) + '%')}</div>
+          <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:10px; color:var(--text-dim); cursor:pointer;">
+            <input type="checkbox" class="wp-toggle-banner" ${showBanner ? 'checked' : ''}> Zobrazit banner v HUD
+          </label>
         </div>
         <button class="waypoint-del-btn" title="Smazat bod" data-idx="${idx}">&times;</button>
       `;
 
+      card.querySelector('.wp-toggle-banner').addEventListener('change', (e) => {
+        e.stopPropagation();
+        saveStateForUndo('Přepnutí HUD banneru: ' + wp.title);
+        wp.showBanner = e.target.checked;
+        saveCurrentProjectSettings();
+        if (!state.isPlaying) renderer.render();
+      });
+
       card.querySelector('.waypoint-del-btn').addEventListener('click', (e) => {
         e.stopPropagation();
+        saveStateForUndo('Smazání bodu ' + wp.title);
         renderer.waypoints.splice(idx, 1);
         updateWaypointsUI();
         renderTimelineWaypoints();
+        saveCurrentProjectSettings();
+        if (!state.isPlaying) renderer.render();
       });
 
-      card.addEventListener('click', () => {
+      card.addEventListener('click', (e) => {
+        if (e.target.tagName.toLowerCase() === 'input') return;
         state.currentTime = wp.progress * state.durationSec;
         updateTimeDisplay();
       });
@@ -2432,11 +2527,17 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderTimelineWaypoints() {
     timelineWaypointsContainer.innerHTML = '';
     const wps = renderer.waypoints || [];
+    const curProg = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+
     wps.forEach((wp) => {
       const marker = document.createElement('div');
       marker.className = 'timeline-waypoint-marker';
+      if (Math.abs(curProg - wp.progress) < 0.015) {
+        marker.classList.add('active');
+      }
       marker.style.left = `${wp.progress * 100}%`;
-      marker.title = `${wp.title}`;
+      marker.innerHTML = `<div class="timeline-wp-tooltip">${wp.title} (${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : (wp.progress * 100).toFixed(0) + '%'})</div>`;
+      
       marker.addEventListener('click', (e) => {
         e.stopPropagation();
         state.currentTime = wp.progress * state.durationSec;
@@ -2493,7 +2594,8 @@ document.addEventListener('DOMContentLoaded', () => {
         dist_km: Number(distKm.toFixed(1)),
         progress: prog,
         duration_progress: 0.05,
-        category: category
+        category: category,
+        showBanner: true
       });
 
       renderer.waypoints.sort((a, b) => (a.dist_km || 0) - (b.dist_km || 0));
@@ -3350,6 +3452,215 @@ document.addEventListener('DOMContentLoaded', () => {
     toast.classList.add('show');
     clearTimeout(toast._timer);
     toast._timer = setTimeout(() => toast.classList.remove('show'), 2800);
+  }
+
+  // ==================== 18. FULLSCREEN PREVIEW & SHORTCUTS ====================
+  const btnFullscreenPreview = document.getElementById('btnFullscreenPreview');
+  function toggleFullscreenPreview() {
+    const container = document.getElementById('canvasContainer');
+    if (!document.fullscreenElement) {
+      if (container.requestFullscreen) {
+        container.requestFullscreen();
+      } else if (container.webkitRequestFullscreen) {
+        container.webkitRequestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  }
+
+  if (btnFullscreenPreview) {
+    btnFullscreenPreview.addEventListener('click', toggleFullscreenPreview);
+  }
+
+  // 'F' key shortcut for fullscreen preview (when not typing in an input)
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+      if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
+        e.preventDefault();
+        toggleFullscreenPreview();
+      }
+    }
+  });
+
+  // ==================== 19. FLOATING LAYERS & FEATURES DRAWER ====================
+  const btnToggleLayersDrawer = document.getElementById('btnToggleLayersDrawer');
+  const floatingLayersDrawer = document.getElementById('floatingLayersDrawer');
+  const btnCloseLayersDrawer = document.getElementById('btnCloseLayersDrawer');
+  const layersSearchInput = document.getElementById('layersSearchInput');
+  const layersItemsContainer = document.getElementById('layersItemsContainer');
+  const layersTabs = document.querySelectorAll('.layers-tab');
+
+  let activeLayersFilterTab = 'all';
+
+  function populateLayersDrawer() {
+    if (!layersItemsContainer) return;
+    layersItemsContainer.innerHTML = '';
+    const layers = renderer.vectorLayers;
+    if (!layers) {
+      layersItemsContainer.innerHTML = '<div style="font-size:10.5px; color:var(--text-dim); padding:10px 0;">Vektorové vrstvy se načítají...</div>';
+      return;
+    }
+
+    const searchTerm = (layersSearchInput ? layersSearchInput.value.trim().toLowerCase() : '');
+    const items = [];
+
+    // Rivers
+    if (layers.rivers) {
+      layers.rivers.forEach(r => {
+        items.push({ id: r.id, name: r.name, category: 'rivers', typeName: 'Řeka', icon: '〰️' });
+      });
+    }
+    // Lakes & Dams
+    if (layers.lakes_dams) {
+      layers.lakes_dams.forEach(l => {
+        items.push({ id: l.id, name: l.name, category: 'lakes', typeName: 'Přehrada/Jezero', icon: '💧' });
+      });
+    }
+    // Places
+    if (layers.places) {
+      layers.places.forEach(p => {
+        items.push({ id: p.id, name: p.name, category: 'places', typeName: p.rank === 1 ? 'Město' : 'Obec', icon: '📍' });
+      });
+    }
+    // Landmarks
+    if (layers.landmarks) {
+      layers.landmarks.forEach(m => {
+        items.push({ id: m.id, name: m.name, category: 'landmarks', typeName: 'Památka', icon: '🏰' });
+      });
+    }
+    // Motorways
+    if (layers.motorways) {
+      layers.motorways.forEach(r => {
+        items.push({ id: r.id, name: r.name, category: 'roads', typeName: 'Dálnice', icon: '🛣️' });
+      });
+    }
+    // Primary Roads
+    if (layers.primary_roads) {
+      layers.primary_roads.forEach(r => {
+        items.push({ id: r.id, name: r.name, category: 'roads', typeName: 'Silnice', icon: '🚗' });
+      });
+    }
+
+    const filtered = items.filter(it => {
+      if (activeLayersFilterTab !== 'all' && it.category !== activeLayersFilterTab) return false;
+      if (searchTerm && !it.name.toLowerCase().includes(searchTerm)) return false;
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      layersItemsContainer.innerHTML = '<div style="font-size:10.5px; color:var(--text-dim); padding:10px 0;">Žádné prvky neodpovídají filtru.</div>';
+      return;
+    }
+
+    filtered.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'layers-item-row';
+      const isEnabled = renderer.isFeatureVisible(item.id);
+
+      row.innerHTML = `
+        <div class="layers-item-info">
+          <span>${item.icon}</span>
+          <span style="font-weight:600; color:#fff;">${item.name}</span>
+          <span class="layers-item-badge">${item.typeName}</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" class="layer-item-toggle" data-id="${item.id}" ${isEnabled ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      `;
+
+      row.querySelector('.layer-item-toggle').addEventListener('change', (e) => {
+        saveStateForUndo(`Přepnutí viditelnosti prvku ${item.name}`);
+        if (!renderer.disabledFeatures) renderer.disabledFeatures = new Set();
+        if (e.target.checked) {
+          renderer.disabledFeatures.delete(item.id);
+        } else {
+          renderer.disabledFeatures.add(item.id);
+        }
+        saveCurrentProjectSettings();
+        if (!state.isPlaying) renderer.render();
+      });
+
+      layersItemsContainer.appendChild(row);
+    });
+  }
+
+  if (btnToggleLayersDrawer) {
+    btnToggleLayersDrawer.addEventListener('click', () => {
+      const isHidden = floatingLayersDrawer.style.display === 'none' || !floatingLayersDrawer.style.display;
+      floatingLayersDrawer.style.display = isHidden ? 'flex' : 'none';
+      if (isHidden) populateLayersDrawer();
+    });
+  }
+  if (btnCloseLayersDrawer) {
+    btnCloseLayersDrawer.addEventListener('click', () => {
+      floatingLayersDrawer.style.display = 'none';
+    });
+  }
+  if (layersSearchInput) {
+    layersSearchInput.addEventListener('input', populateLayersDrawer);
+  }
+  layersTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      layersTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      activeLayersFilterTab = tab.dataset.tab || 'all';
+      populateLayersDrawer();
+    });
+  });
+
+  // ==================== 20. START & FINISH MARKER SETTINGS ====================
+  const toggleStartMarker = document.getElementById('toggleStartMarker');
+  const toggleFinishMarker = document.getElementById('toggleFinishMarker');
+
+  if (markerStyleSelect) {
+    markerStyleSelect.addEventListener('change', (e) => {
+      saveStateForUndo('Styl značek: ' + e.target.value);
+      renderer.startFinishStyle = e.target.value;
+      renderer.markerStyle = e.target.value;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (toggleStartMarker) {
+    toggleStartMarker.addEventListener('change', (e) => {
+      saveStateForUndo('Zobrazit START: ' + e.target.checked);
+      renderer.toggles.startMarker = e.target.checked;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (toggleFinishMarker) {
+    toggleFinishMarker.addEventListener('change', (e) => {
+      saveStateForUndo('Zobrazit CÍL: ' + e.target.checked);
+      renderer.toggles.finishMarker = e.target.checked;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  // ==================== 21. LOD MEANDERS & GEOMETRY ====================
+  const lodMeandersSlider = document.getElementById('lodMeandersSlider');
+  const lodMeandersVal = document.getElementById('lodMeandersVal');
+
+  if (lodMeandersSlider) {
+    lodMeandersSlider.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value);
+      if (lodMeandersVal) lodMeandersVal.textContent = `${val} / 5`;
+      if (!renderer.lod) renderer.lod = {};
+      renderer.lod.meanders = val;
+      if (!state.isPlaying) renderer.render();
+    });
+    lodMeandersSlider.addEventListener('change', (e) => {
+      saveStateForUndo('Členitost a meandry: ' + e.target.value);
+      saveCurrentProjectSettings();
+    });
   }
 
   // START STUDIO
