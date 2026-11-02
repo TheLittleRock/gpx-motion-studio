@@ -989,6 +989,29 @@
           <button class="btn btn-secondary" id="btnAddWpAtCurrent" style="width:100%; justify-content:center; margin-bottom:12px;">
             + Vložit bod na aktuální pozici
           </button>
+
+          <!-- GLOBAL WAYPOINT HUD TIMING CONTROLS -->
+          <div class="section-title">Časování a Tolerance Zobrazení v HUD</div>
+          <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:12px;">
+            <div class="form-group" style="margin-bottom:8px;">
+              <div class="form-label">
+                <span>Časování zobrazení (Předstih / Zpoždění)</span>
+                <span class="form-val" id="wpTimingOffsetVal">0.0 s (Při průjezdu)</span>
+              </div>
+              <input type="range" class="form-range" id="wpTimingOffsetSlider" min="-3.0" max="3.0" step="0.1" value="0.0" title="Dvojklik pro reset na 0.0s. Záporná hodnota = dříve před bodem, kladná = později po průjezdu.">
+            </div>
+            <div class="form-group" style="margin-bottom:4px;">
+              <div class="form-label">
+                <span>Doba zobrazení banneru (Trvání)</span>
+                <span class="form-val" id="wpDurationVal">3.0 s</span>
+              </div>
+              <input type="range" class="form-range" id="wpDurationSlider" min="0.5" max="8.0" step="0.1" value="3.0" title="Dvojklik pro reset na 3.0s">
+            </div>
+            <div style="font-size:10px; color:var(--text-dim); margin-top:6px; line-height:1.4;">
+              💡 <b>Tip:</b> Pokud se vám u konkrétního bodu zdá zobrazení moc brzy nebo moc pozdě, můžete časování doladit přímo u každého milníku níže v seznamu.
+            </div>
+          </div>
+
           <div id="waypointsListContainer"></div>
         </div>
       </div>

@@ -151,6 +151,13 @@ class CanvasRenderer {
     // Travelling Rider Pulse Speed
     this.pulseSpeed = 1.0;
 
+    // Waypoint HUD Timing Tolerance & Duration (in seconds)
+    this.waypointOffsetSec = 0.0;
+    this.waypointDurationSec = 3.0;
+    this.durationSec = 10.0;
+    this.currentTime = 0.0;
+    this.trimMode = 'loop';
+
     // Kilometer-based Trimming
     this.trimInKm = 0.0;
     this.trimOutKm = 100.0;
@@ -2616,23 +2623,99 @@ class CanvasRenderer {
     ctx.restore();
   }
 
-  // --- WAYPOINT CALLOUTS ---
+  // --- WAYPOINT TRACK INDEX RESOLVER ---
+  getWaypointTrackIndex(wp) {
+    if (!this.gpxData || !this.gpxData.points || this.gpxData.points.length === 0) return 0;
+    const pts = this.gpxData.points;
+    const n = pts.length;
+
+    if (wp._cachedTrackIdx !== undefined && wp._cachedTrackIdx >= 0 && wp._cachedTrackIdx < n) {
+      return wp._cachedTrackIdx;
+    }
+
+    let bestIdx = 0;
+    if (wp.lat != null && wp.lon != null) {
+      let minDist = Infinity;
+      for (let i = 0; i < n; i++) {
+        const d = Math.hypot(pts[i].lat - wp.lat, pts[i].lon - wp.lon);
+        if (d < minDist) {
+          minDist = d;
+          bestIdx = i;
+        }
+      }
+    } else if (wp.dist_km != null) {
+      let minDiff = Infinity;
+      for (let i = 0; i < n; i++) {
+        const diff = Math.abs(pts[i].dist_km - wp.dist_km);
+        if (diff < minDiff) {
+          minDiff = diff;
+          bestIdx = i;
+        }
+      }
+    } else {
+      bestIdx = Math.min(n - 1, Math.max(0, Math.floor((wp.progress || 0) * (n - 1))));
+    }
+
+    wp._cachedTrackIdx = bestIdx;
+    return bestIdx;
+  }
+
+  // --- WAYPOINT CALLOUTS (TOLERANCE, OFFSET & DURATION AWARE) ---
   drawActiveWaypointCallout(progress) {
     if (!this.waypoints || this.waypoints.length === 0) return;
+    if (!this.gpxData || !this.gpxData.points || this.gpxData.points.length === 0) return;
 
     const s = this.hudScale;
+    const totalDuration = this.durationSec || 10.0;
+    const pts = this.gpxData.points;
+    const n = pts.length;
+
+    // Current animation time in seconds
+    const curProg = (progress !== undefined) ? progress : this.progress;
+    const currentSec = (this.currentTime !== undefined) ? this.currentTime : (curProg * totalDuration);
+
+    const globalOffsetSec = (this.waypointOffsetSec !== undefined) ? Number(this.waypointOffsetSec) : 0.0;
+    const globalDurationSec = (this.waypointDurationSec !== undefined) ? Number(this.waypointDurationSec) : 3.0;
+
     let activeWp = null;
     let factor = 0;
+    let bestCloseness = Infinity;
 
     for (const wp of this.waypoints) {
       if (wp.showBanner === false) continue;
-      const durProgress = wp.duration_progress || 0.04;
-      const diff = progress - wp.progress;
-      if (diff >= -0.01 && diff <= durProgress) {
-        activeWp = wp;
-        const normT = (diff + 0.01) / (durProgress + 0.01);
-        factor = Math.sin(normT * Math.PI);
-        break;
+
+      const trackIdx = this.getWaypointTrackIndex(wp);
+      const trackProg = trackIdx / Math.max(1, n - 1);
+
+      let normProg;
+      if (this.trimMode === 'fit') {
+        const tRange = Math.max(0.0001, this.trimOut - this.trimIn);
+        normProg = (trackProg - this.trimIn) / tRange;
+      } else {
+        normProg = trackProg;
+      }
+
+      // Expected arrival time in animation seconds
+      const arrivalSec = normProg * totalDuration;
+
+      // Waypoint specific or global timing offset and duration
+      const wpOffset = (wp.offset_sec !== undefined && wp.offset_sec !== null) ? Number(wp.offset_sec) : globalOffsetSec;
+      const wpDur = (wp.duration_sec !== undefined && wp.duration_sec !== null) ? Number(wp.duration_sec) : globalDurationSec;
+
+      // Display window: starts (wpDur * 0.35 - wpOffset) seconds before arrival and lasts wpDur seconds
+      const windowStart = arrivalSec - (wpDur * 0.35) + wpOffset;
+      const windowEnd = windowStart + wpDur;
+
+      if (currentSec >= windowStart && currentSec <= windowEnd && wpDur > 0) {
+        const rel = (currentSec - windowStart) / wpDur; // 0.0 to 1.0
+        const currentFactor = Math.sin(rel * Math.PI);
+        const distToCenter = Math.abs(currentSec - (windowStart + wpDur * 0.5));
+
+        if (distToCenter < bestCloseness) {
+          bestCloseness = distToCenter;
+          activeWp = wp;
+          factor = currentFactor;
+        }
       }
     }
 
@@ -2640,6 +2723,8 @@ class CanvasRenderer {
 
     const ctx = this.ctx;
     ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
     ctx.globalAlpha = Math.min(1.0, factor * 1.5);
 
     const slideOffset = (1.0 - factor) * 35 * s;

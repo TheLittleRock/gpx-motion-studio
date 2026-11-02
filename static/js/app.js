@@ -208,6 +208,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if (zSlider) zSlider.value = s.minimapFollowZoom;
       if (zVal) zVal.textContent = `${s.minimapFollowZoom.toFixed(1)}x`;
     }
+    if (s.waypointOffsetSec !== undefined) {
+      renderer.waypointOffsetSec = s.waypointOffsetSec;
+      const offSlider = document.getElementById('wpTimingOffsetSlider');
+      if (offSlider) offSlider.value = s.waypointOffsetSec;
+    }
+    if (s.waypointDurationSec !== undefined) {
+      renderer.waypointDurationSec = s.waypointDurationSec;
+      const durSlider = document.getElementById('wpDurationSlider');
+      if (durSlider) durSlider.value = s.waypointDurationSec;
+    }
+    if (typeof updateWpTimingLabels === 'function') updateWpTimingLabels();
+
     if (s.durationSec) {
       state.durationSec = s.durationSec;
       const cDur = document.getElementById('customDurationInput');
@@ -766,6 +778,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Load Assets for this project
       await loadAssets(proj.active_gpx);
+
+      // Restore Waypoint Timing Settings
+      if (s.waypointOffsetSec !== undefined) {
+        renderer.waypointOffsetSec = s.waypointOffsetSec;
+        const offSlider = document.getElementById('wpTimingOffsetSlider');
+        if (offSlider) offSlider.value = s.waypointOffsetSec;
+      }
+      if (s.waypointDurationSec !== undefined) {
+        renderer.waypointDurationSec = s.waypointDurationSec;
+        const durSlider = document.getElementById('wpDurationSlider');
+        if (durSlider) durSlider.value = s.waypointDurationSec;
+      }
+      if (typeof updateWpTimingLabels === 'function') updateWpTimingLabels();
 
       // Restore Project Waypoints and Custom Landmarks (Preserve against suggested GPX defaults)
       if (s.waypoints && Array.isArray(s.waypoints) && s.waypoints.length > 0) {
@@ -1579,6 +1604,10 @@ document.addEventListener('DOMContentLoaded', () => {
       drawZoomCurve();
     }
 
+    renderer.durationSec = state.durationSec;
+    renderer.currentTime = state.currentTime;
+    renderer.trimMode = state.trimMode;
+
     if (state.trimMode === 'fit') {
       const norm = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
       renderer.progress = renderer.trimIn + norm * (renderer.trimOut - renderer.trimIn);
@@ -1592,6 +1621,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function updateTimeDisplay() {
+    renderer.durationSec = state.durationSec;
+    renderer.currentTime = state.currentTime;
+    renderer.trimMode = state.trimMode;
+
     const cur = state.currentTime;
     const tot = state.durationSec;
 
@@ -1924,6 +1957,8 @@ document.addEventListener('DOMContentLoaded', () => {
               viewportPan: renderer.viewportPan,
               viewportZoom: renderer.viewportZoom,
               waypoints: renderer.waypoints,
+              waypointOffsetSec: renderer.waypointOffsetSec,
+              waypointDurationSec: renderer.waypointDurationSec,
               landmarks: renderer.landmarks,
               disabledFeatures: Array.from(renderer.disabledFeatures || [])
             }
@@ -2048,12 +2083,26 @@ document.addEventListener('DOMContentLoaded', () => {
         if (colorUnitsEl) colorUnitsEl.value = color;
         if (colorUnitsValEl) colorUnitsValEl.textContent = color.toUpperCase();
         renderer.colors.units = color;
+      } else if (targetId === 'colorWaypointPin') {
+        const cWpPin = document.getElementById('colorWaypointPin');
+        const cWpPinVal = document.getElementById('colorWaypointPinVal');
+        if (cWpPin) cWpPin.value = color;
+        if (cWpPinVal) cWpPinVal.textContent = color.toUpperCase();
+        renderer.colors.waypointPin = color;
+      } else if (targetId === 'colorWaypointText') {
+        const cWpText = document.getElementById('colorWaypointText');
+        const cWpTextVal = document.getElementById('colorWaypointTextVal');
+        if (cWpText) cWpText.value = color;
+        if (cWpTextVal) cWpTextVal.textContent = color.toUpperCase();
+        renderer.colors.waypointText = color;
       }
 
       parentPreset.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
       swatch.classList.add('active');
 
+      saveStateForUndo('Změna předvolené barvy: ' + targetId);
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   });
 
@@ -2806,16 +2855,111 @@ document.addEventListener('DOMContentLoaded', () => {
       const card = document.createElement('div');
       card.className = 'waypoint-card';
       const showBanner = wp.showBanner !== false;
+      const hasCustomTiming = (wp.offset_sec != null || wp.duration_sec != null);
+      const curOffset = (wp.offset_sec !== undefined && wp.offset_sec !== null) ? Number(wp.offset_sec) : (renderer.waypointOffsetSec || 0.0);
+      const curDur = (wp.duration_sec !== undefined && wp.duration_sec !== null) ? Number(wp.duration_sec) : (renderer.waypointDurationSec || 3.0);
+
       card.innerHTML = `
         <div class="waypoint-info" style="flex:1;">
-          <div class="waypoint-title-text" style="font-weight:700; color:#fff;">${wp.title}</div>
-          <div class="waypoint-sub-text" style="font-size:10px; color:var(--text-muted);">${wp.subtitle || ''} • ${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : ((wp.progress * 100).toFixed(0) + '%')}</div>
-          <label style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:10px; color:var(--text-dim); cursor:pointer;">
-            <input type="checkbox" class="wp-toggle-banner" ${showBanner ? 'checked' : ''}> Zobrazit banner v HUD
-          </label>
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div class="waypoint-title-text" style="font-weight:700; color:#fff; font-size:12px;">${wp.title}</div>
+            <button class="waypoint-del-btn" title="Smazat bod" data-idx="${idx}" style="background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:16px; padding:0 4px; line-height:1;">&times;</button>
+          </div>
+          <div class="waypoint-sub-text" style="font-size:10px; color:var(--text-muted); margin-top:2px;">${wp.subtitle || ''} • ${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : ((wp.progress * 100).toFixed(0) + '%')}</div>
+          
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-top:6px;">
+            <label style="display:flex; align-items:center; gap:5px; font-size:10px; color:var(--text-dim); cursor:pointer;">
+              <input type="checkbox" class="wp-toggle-banner" ${showBanner ? 'checked' : ''}> Zobrazit banner v HUD
+            </label>
+            <button class="wp-toggle-timing-btn" type="button" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:${hasCustomTiming ? 'var(--accent-cyan)' : 'var(--text-muted)'}; font-size:9.5px; border-radius:3px; padding:2px 6px; cursor:pointer;">
+              ⏱️ Časování ${hasCustomTiming ? '●' : ''}
+            </button>
+          </div>
+
+          <div class="wp-timing-panel" style="display:${hasCustomTiming ? 'block' : 'none'}; margin-top:8px; padding:8px; background:rgba(0,0,0,0.35); border-radius:4px; border:1px solid rgba(255,255,255,0.08);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+              <span style="font-size:9.5px; color:var(--text-muted);">Předstih / Zpoždění:</span>
+              <span class="wp-offset-val" style="font-size:9.5px; font-weight:700; color:#fff;">${curOffset >= 0 ? '+' : ''}${curOffset.toFixed(1)} s</span>
+            </div>
+            <input type="range" class="form-range wp-offset-slider" min="-3.0" max="3.0" step="0.1" value="${curOffset}" style="margin-bottom:6px;">
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+              <span style="font-size:9.5px; color:var(--text-muted);">Doba zobrazení:</span>
+              <span class="wp-dur-val" style="font-size:9.5px; font-weight:700; color:#fff;">${curDur.toFixed(1)} s</span>
+            </div>
+            <input type="range" class="form-range wp-dur-slider" min="0.5" max="8.0" step="0.1" value="${curDur}">
+            
+            <div style="display:flex; justify-content:flex-end; margin-top:4px;">
+              <button class="wp-reset-timing-btn" type="button" style="background:transparent; border:none; color:var(--text-dim); font-size:9px; cursor:pointer; text-decoration:underline; padding:0;">Reset na globální</button>
+            </div>
+          </div>
         </div>
-        <button class="waypoint-del-btn" title="Smazat bod" data-idx="${idx}">&times;</button>
       `;
+
+      // Toggle Timing Panel
+      const timingBtn = card.querySelector('.wp-toggle-timing-btn');
+      const timingPanel = card.querySelector('.wp-timing-panel');
+      if (timingBtn && timingPanel) {
+        timingBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isHidden = timingPanel.style.display === 'none';
+          timingPanel.style.display = isHidden ? 'block' : 'none';
+        });
+      }
+
+      // Offset Slider
+      const offsetSlider = card.querySelector('.wp-offset-slider');
+      const offsetVal = card.querySelector('.wp-offset-val');
+      if (offsetSlider && offsetVal) {
+        offsetSlider.addEventListener('input', (e) => {
+          e.stopPropagation();
+          const val = parseFloat(e.target.value) || 0;
+          wp.offset_sec = val;
+          offsetVal.textContent = `${val >= 0 ? '+' : ''}${val.toFixed(1)} s`;
+          if (timingBtn) timingBtn.style.color = 'var(--accent-cyan)';
+          if (!state.isPlaying) renderer.render();
+        });
+        offsetSlider.addEventListener('change', () => {
+          saveStateForUndo('Změna posunu bodu: ' + wp.title);
+          saveCurrentProjectSettings();
+        });
+      }
+
+      // Duration Slider
+      const durSlider = card.querySelector('.wp-dur-slider');
+      const durVal = card.querySelector('.wp-dur-val');
+      if (durSlider && durVal) {
+        durSlider.addEventListener('input', (e) => {
+          e.stopPropagation();
+          const val = parseFloat(e.target.value) || 3.0;
+          wp.duration_sec = val;
+          durVal.textContent = `${val.toFixed(1)} s`;
+          if (timingBtn) timingBtn.style.color = 'var(--accent-cyan)';
+          if (!state.isPlaying) renderer.render();
+        });
+        durSlider.addEventListener('change', () => {
+          saveStateForUndo('Změna délky bodu: ' + wp.title);
+          saveCurrentProjectSettings();
+        });
+      }
+
+      // Reset to Global
+      const resetBtn = card.querySelector('.wp-reset-timing-btn');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          delete wp.offset_sec;
+          delete wp.duration_sec;
+          if (offsetSlider) offsetSlider.value = renderer.waypointOffsetSec || 0.0;
+          if (offsetVal) offsetVal.textContent = `${(renderer.waypointOffsetSec || 0.0) >= 0 ? '+' : ''}${(renderer.waypointOffsetSec || 0.0).toFixed(1)} s`;
+          if (durSlider) durSlider.value = renderer.waypointDurationSec || 3.0;
+          if (durVal) durVal.textContent = `${(renderer.waypointDurationSec || 3.0).toFixed(1)} s`;
+          if (timingBtn) timingBtn.style.color = 'var(--text-muted)';
+          saveStateForUndo('Reset časování bodu na výchozí: ' + wp.title);
+          saveCurrentProjectSettings();
+          if (!state.isPlaying) renderer.render();
+        });
+      }
 
       card.querySelector('.wp-toggle-banner').addEventListener('change', (e) => {
         e.stopPropagation();
@@ -2840,9 +2984,21 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       card.addEventListener('click', (e) => {
-        if (e.target.tagName.toLowerCase() === 'input') return;
-        state.currentTime = wp.progress * state.durationSec;
+        if (e.target.closest('input') || e.target.closest('button') || e.target.closest('label')) return;
+        const pts = renderer.gpxData ? renderer.gpxData.points : null;
+        let normProg = wp.progress || 0;
+        if (pts && pts.length > 0 && typeof renderer.getWaypointTrackIndex === 'function') {
+          const trackIdx = renderer.getWaypointTrackIndex(wp);
+          const trackProg = trackIdx / Math.max(1, pts.length - 1);
+          if (state.trimMode === 'fit') {
+            normProg = (trackProg - renderer.trimIn) / Math.max(0.0001, renderer.trimOut - renderer.trimIn);
+          } else {
+            normProg = trackProg;
+          }
+        }
+        state.currentTime = Math.max(0, Math.min(state.durationSec, normProg * state.durationSec));
         updateTimeDisplay();
+        if (!state.isPlaying) renderer.render();
       });
 
       waypointsListContainer.appendChild(card);
@@ -2855,18 +3011,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const curProg = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
 
     wps.forEach((wp) => {
+      const pts = renderer.gpxData ? renderer.gpxData.points : null;
+      let displayProg = wp.progress || 0;
+      if (pts && pts.length > 0 && typeof renderer.getWaypointTrackIndex === 'function') {
+        const trackIdx = renderer.getWaypointTrackIndex(wp);
+        const trackProg = trackIdx / Math.max(1, pts.length - 1);
+        if (state.trimMode === 'fit') {
+          displayProg = (trackProg - renderer.trimIn) / Math.max(0.0001, renderer.trimOut - renderer.trimIn);
+        } else {
+          displayProg = trackProg;
+        }
+      }
+      if (displayProg < 0 || displayProg > 1) return;
+
       const marker = document.createElement('div');
       marker.className = 'timeline-waypoint-marker';
-      if (Math.abs(curProg - wp.progress) < 0.015) {
+      if (Math.abs(curProg - displayProg) < 0.015) {
         marker.classList.add('active');
       }
-      marker.style.left = `${wp.progress * 100}%`;
-      marker.innerHTML = `<div class="timeline-wp-tooltip">${wp.title} (${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : (wp.progress * 100).toFixed(0) + '%'})</div>`;
+      marker.style.left = `${displayProg * 100}%`;
+      marker.innerHTML = `<div class="timeline-wp-tooltip">${wp.title} (${wp.dist_km ? wp.dist_km.toFixed(1) + ' km' : ((displayProg * 100).toFixed(0) + '%')})</div>`;
       
       marker.addEventListener('click', (e) => {
         e.stopPropagation();
-        state.currentTime = wp.progress * state.durationSec;
+        state.currentTime = displayProg * state.durationSec;
         updateTimeDisplay();
+        if (!state.isPlaying) renderer.render();
       });
       timelineWaypointsContainer.appendChild(marker);
     });
@@ -3043,12 +3213,17 @@ document.addEventListener('DOMContentLoaded', () => {
       offRenderer.trimOutKm = renderer.trimOutKm;
       offRenderer.viewportZoom = renderer.viewportZoom;
       offRenderer.viewportPan = { ...renderer.viewportPan };
+      offRenderer.durationSec = state.durationSec;
+      offRenderer.trimMode = state.trimMode;
+      offRenderer.waypointOffsetSec = renderer.waypointOffsetSec;
+      offRenderer.waypointDurationSec = renderer.waypointDurationSec;
 
       const batchSize = 10;
       let frameBatch = [];
 
       for (let i = 0; i < totalExportFrames; i++) {
         const frameTime = (i / (totalExportFrames - 1 || 1)) * state.durationSec;
+        offRenderer.currentTime = frameTime;
         offRenderer.progress = frameTime / state.durationSec;
         offRenderer.render(1.0 / chosenFps);
 
@@ -4303,6 +4478,67 @@ document.addEventListener('DOMContentLoaded', () => {
       pulseSpeedSlider.value = 1.0;
       if (pulseSpeedVal) pulseSpeedVal.textContent = '1.0x';
       renderer.pulseSpeed = 1.0;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  // ==================== 26. GLOBAL WAYPOINT HUD TIMING & DURATION ====================
+  const wpTimingOffsetSlider = document.getElementById('wpTimingOffsetSlider');
+  const wpTimingOffsetVal = document.getElementById('wpTimingOffsetVal');
+  const wpDurationSlider = document.getElementById('wpDurationSlider');
+  const wpDurationVal = document.getElementById('wpDurationVal');
+
+  function updateWpTimingLabels() {
+    if (wpTimingOffsetSlider && wpTimingOffsetVal) {
+      const v = parseFloat(wpTimingOffsetSlider.value) || 0;
+      let label = `${v >= 0 ? '+' : ''}${v.toFixed(1)} s`;
+      if (Math.abs(v) < 0.05) label += ' (Při průjezdu)';
+      else if (v < 0) label += ` (${Math.abs(v).toFixed(1)} s před bodem)`;
+      else label += ` (${v.toFixed(1)} s po průjezdu)`;
+      wpTimingOffsetVal.textContent = label;
+    }
+    if (wpDurationSlider && wpDurationVal) {
+      const v = parseFloat(wpDurationSlider.value) || 3.0;
+      wpDurationVal.textContent = `${v.toFixed(1)} s`;
+    }
+  }
+
+  if (wpTimingOffsetSlider) {
+    wpTimingOffsetSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value) || 0;
+      renderer.waypointOffsetSec = val;
+      updateWpTimingLabels();
+      if (!state.isPlaying) renderer.render();
+    });
+    wpTimingOffsetSlider.addEventListener('change', () => {
+      saveStateForUndo('Časování milníků (offset): ' + renderer.waypointOffsetSec + 's');
+      saveCurrentProjectSettings();
+    });
+    wpTimingOffsetSlider.addEventListener('dblclick', () => {
+      wpTimingOffsetSlider.value = 0.0;
+      renderer.waypointOffsetSec = 0.0;
+      updateWpTimingLabels();
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+
+  if (wpDurationSlider) {
+    wpDurationSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value) || 3.0;
+      renderer.waypointDurationSec = val;
+      updateWpTimingLabels();
+      if (!state.isPlaying) renderer.render();
+    });
+    wpDurationSlider.addEventListener('change', () => {
+      saveStateForUndo('Doba zobrazení milníků: ' + renderer.waypointDurationSec + 's');
+      saveCurrentProjectSettings();
+    });
+    wpDurationSlider.addEventListener('dblclick', () => {
+      wpDurationSlider.value = 3.0;
+      renderer.waypointDurationSec = 3.0;
+      updateWpTimingLabels();
       saveCurrentProjectSettings();
       if (!state.isPlaying) renderer.render();
     });
