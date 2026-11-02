@@ -1892,21 +1892,6 @@ class CanvasRenderer {
     ctx.restore();
   }
 
-    // 4. Start & Finish Badges on Map
-    const startPix = this.gpxToMapPixels(points[0].merc_x, points[0].merc_y);
-    this.drawStartFinishMarker(ctx, startPix.x, startPix.y, `START • ${this.startCityName}`, this.colors.startMarker, this.progress <= 0.02);
-
-    const finishPix = this.gpxToMapPixels(points[n - 1].merc_x, points[n - 1].merc_y);
-    this.drawStartFinishMarker(ctx, finishPix.x, finishPix.y, `CÍL • ${this.finishCityName}`, this.colors.finishMarker, this.progress >= 0.98);
-
-    // 5. Pulsing Rider Beacon on Map
-    if (this.toggles.riderDot) {
-      this.drawPulsingRiderDot(ctx, riderPix.x, riderPix.y, 1.0);
-    }
-
-    ctx.restore();
-  }
-
   // --- PULSING RIDER DOT ---
   drawPulsingRiderDot(ctx, x, y, s) {
     const pulse1 = (this.pulsePhase % 2.0) / 2.0;

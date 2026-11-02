@@ -39,22 +39,22 @@ body {
 
 /* TOP HEADER */
 .studio-header {
-  height: 52px;
+  height: 46px;
   background-color: var(--bg-panel);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 12px;
   user-select: none;
   z-index: 30;
-  gap: 16px;
+  gap: 10px;
 }
 
 .logo-area {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -62,14 +62,14 @@ body {
   background: linear-gradient(135deg, #0284c7, #0ea5e9);
   color: white;
   font-weight: 800;
-  font-size: 11px;
-  padding: 3px 8px;
+  font-size: 10.5px;
+  padding: 2px 6px;
   border-radius: 4px;
-  letter-spacing: 1px;
+  letter-spacing: 0.8px;
 }
 
 .logo-title {
-  font-size: 14.5px;
+  font-size: 13.5px;
   font-weight: 700;
   letter-spacing: 0.5px;
   color: #fff;
@@ -83,39 +83,36 @@ body {
   background: rgba(0, 240, 255, 0.08);
   border: 1px solid rgba(0, 240, 255, 0.28);
   color: #38bdf8;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 12px;
+  padding: 2px 6px;
+  border-radius: 10px;
 }
 
 .header-center {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
   flex-wrap: nowrap;
-  overflow: hidden;
-}
-
-.project-selector-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .project-select-btn {
   background: var(--bg-input);
   border: 1px solid var(--border-color);
   color: var(--text-main);
-  padding: 6px 12px;
+  padding: 4px 10px;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   cursor: pointer;
   transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .project-select-btn:hover {
@@ -123,18 +120,46 @@ body {
   background: var(--bg-panel-alt);
 }
 
+.style-toggle-group {
+  display: flex;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.style-toggle-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-muted);
+  border: none;
+  background: transparent;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.style-toggle-btn.active {
+  background: #252e3d;
+  color: #fff;
+  border: 1px solid #3b4759;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .btn {
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  padding: 6px 13px;
+  padding: 4px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
@@ -214,67 +239,108 @@ body {
 
 .viewport-toolbar {
   height: 38px;
-  background: rgba(15, 18, 24, 0.90);
-  backdrop-filter: blur(8px);
+  background: rgba(15, 18, 24, 0.95);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
-  font-size: 12px;
-  z-index: 10;
-  gap: 12px;
-}
-
-.style-toggle-group {
-  display: flex;
-  background: var(--bg-input);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 2px;
-}
-
-.style-toggle-btn {
-  padding: 3px 10px;
+  padding: 0 10px;
   font-size: 11px;
-  font-weight: 600;
-  border-radius: 3px;
-  cursor: pointer;
-  color: var(--text-muted);
-  border: none;
-  background: transparent;
-  transition: all 0.15s;
+  z-index: 10;
+  gap: 8px;
+  overflow: hidden;
 }
 
-.style-toggle-btn.active {
-  background: #252e3d;
-  color: #fff;
-  border: 1px solid #3b4759;
+.viewport-anim-mode {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.toolbar-label {
+  font-weight: 700;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.anim-select {
+  background: var(--bg-input);
+  font-weight: 700;
+  color: var(--accent-cyan);
+  height: 26px;
+  padding: 2px 6px;
+  font-size: 11px;
 }
 
 .viewport-stats {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .viewport-stats .stat-item {
-  display: flex;
-  gap: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.viewport-stats .stat-sep {
+  color: rgba(255, 255, 255, 0.15);
+  font-size: 9px;
 }
 
 .viewport-stats .stat-val {
   color: var(--text-main);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .viewport-tools {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.zoom-controls-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-input);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.zoom-controls-group .tool-btn {
+  border: none;
+  background: transparent;
+  padding: 2px 6px;
+  font-size: 10px;
+  height: 22px;
+  line-height: 22px;
+}
+
+.zoom-controls-group .tool-btn:hover {
+  background: var(--bg-panel-alt);
+  color: #fff;
+}
+
+.zoom-controls-group .tool-btn.btn-fit {
+  color: var(--accent-cyan);
+  font-weight: 700;
+}
+
+.res-select {
+  height: 26px;
+  font-size: 11px;
+  background: var(--bg-input);
 }
 
 .tool-btn {
@@ -602,8 +668,8 @@ body {
 
 /* RIGHT INSPECTOR PANEL (400px, NON-WRAPPING TABS) */
 .inspector-panel {
-  width: 400px;
-  min-width: 400px;
+  width: 420px;
+  min-width: 420px;
   background-color: var(--bg-panel);
   border-left: 1px solid var(--border-color);
   display: flex;
@@ -612,12 +678,11 @@ body {
 }
 
 .inspector-tabs {
-  height: 42px;
+  height: 38px;
   display: flex;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-panel-alt);
-  overflow-x: auto;
-  white-space: nowrap;
+  overflow: hidden;
 }
 
 .inspector-tab {
@@ -631,7 +696,7 @@ body {
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
-  padding: 0 8px;
+  padding: 0 4px;
   white-space: nowrap;
 }
 

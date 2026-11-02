@@ -21,11 +21,9 @@
 
     <div class="header-center">
       <!-- Project Selector Modal Trigger -->
-      <div class="project-selector-group">
-        <button class="project-select-btn" id="btnOpenProjectsModal" title="Správce projektů (Uložit, otevřít, duplikovat)">
-          📁 Projekt: <span id="currentProjectName" style="color:var(--accent-cyan);">Načítání...</span> ▾
-        </button>
-      </div>
+      <button class="project-select-btn" id="btnOpenProjectsModal" title="Správce projektů (Uložit, otevřít, duplikovat)">
+        📁 <span id="currentProjectName" style="color:var(--accent-cyan); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:middle;">Projekt...</span> ▾
+      </button>
 
       <!-- Map Style Quick Switch -->
       <div class="style-toggle-group">
@@ -37,12 +35,10 @@
         </button>
       </div>
 
-      <!-- Speed Ramp Panel Toggle -->
+      <!-- Speed Ramp & Zoom Ramp Toggles -->
       <button class="tool-btn" id="btnToggleSpeedRamp" title="Otevřít / Zavřít Bezier Speed Ramp křivku rychlosti">
         ⚡ Speed Ramp
       </button>
-
-      <!-- Zoom Ramp Panel Toggle -->
       <button class="tool-btn" id="btnToggleZoomRamp" title="Otevřít / Zavřít Bezier Zoom Ramp křivku přiblížení">
         🔍 Zoom Ramp
       </button>
@@ -55,10 +51,10 @@
 
     <div class="header-actions">
       <button class="btn btn-fusion" id="btnOpenFusionModal">
-        ✨ Fusion Makro (.setting)
+        ✨ Fusion (.setting)
       </button>
       <button class="btn btn-primary" id="btnOpenExportModal">
-        🎬 Export DaVinci Videa
+        🎬 Export DaVinci
       </button>
     </div>
   </header>
@@ -69,40 +65,41 @@
     <section class="viewport-area">
       <!-- VIEWPORT TOOLBAR -->
       <div class="viewport-toolbar">
-        <div style="display:flex; align-items:center; gap:8px;">
-          <label style="font-weight:700; font-size:11px; color:var(--text-muted);">Režim animace:</label>
-          <select id="animModeSelect" class="tool-btn" style="background:var(--bg-input); font-weight:700; color:var(--accent-cyan); height:28px;">
-            <option value="hud" selected>📊 Telemetrie HUD (Průhledný overlay)</option>
-            <option value="flyover">🚁 Dynamický přelet (Kamera na mapě)</option>
-            <option value="fullscreen">🗺️ Celá trasa (Animovaný přehled)</option>
-            <option value="spotlight">🔍 Zaměření místa (Přiblížení na bod)</option>
+        <div class="viewport-anim-mode">
+          <label class="toolbar-label">Režim:</label>
+          <select id="animModeSelect" class="tool-btn anim-select">
+            <option value="hud" selected>📊 HUD</option>
+            <option value="flyover">🚁 Přelet</option>
+            <option value="fullscreen">🗺️ Celá trasa</option>
+            <option value="spotlight">🔍 Spotlight</option>
           </select>
         </div>
 
         <div class="viewport-stats">
-          <div class="stat-item">Vzdálenost: <span class="stat-val" id="statDistance">-- km</span></div>
-          <div class="stat-item">Nastoupáno: <span class="stat-val" id="statGain">+-- m</span></div>
-          <div class="stat-item">Vrchol: <span class="stat-val" id="statPeak">-- m</span></div>
-          <div class="stat-item">Body: <span class="stat-val" id="statPoints">--</span></div>
+          <span class="stat-item">Trasa: <strong class="stat-val" id="statDistance">-- km</strong></span>
+          <span class="stat-sep">•</span>
+          <span class="stat-item"><strong class="stat-val" id="statGain">+-- m</strong></span>
+          <span class="stat-sep">•</span>
+          <span class="stat-item">Max: <strong class="stat-val" id="statPeak">-- m</strong></span>
+          <span class="stat-sep">•</span>
+          <span class="stat-item">Body: <strong class="stat-val" id="statPoints">--</strong></span>
         </div>
 
         <div class="viewport-tools">
-          <div style="display:flex; align-items:center; gap:4px; margin-right:4px;">
-            <span style="font-size:10px; color:var(--text-muted); font-weight:600;">Lupa:</span>
-            <button class="tool-btn" id="btnZoomOutView" title="Oddálit celý pohled" style="padding:2px 6px;">−</button>
-            <input type="range" class="form-range" id="viewportZoomSlider" min="0.2" max="4.0" step="0.05" value="1.0" style="width:65px;" title="Měřítko viewportu (Dvojklik pro reset na 100%)">
-            <button class="tool-btn" id="btnZoomInView" title="Přiblížit celý pohled" style="padding:2px 6px;">+</button>
-            <button class="tool-btn" id="btnResetViewportZoom" title="Resetovat měřítko na 100%" style="padding:2px 6px; font-size:10px;">100%</button>
-            <button class="tool-btn" id="btnFitViewportRoute" title="Přizpůsobit celou trasu do okna (100% viditelnost)" style="padding:2px 6px; font-size:10px; color:var(--accent-cyan);">Fit</button>
+          <div class="zoom-controls-group">
+            <button class="tool-btn" id="btnZoomOutView" title="Oddálit pohled (až 0.2x)">−</button>
+            <button class="tool-btn" id="btnResetViewportZoom" title="Resetovat na 100%">100%</button>
+            <button class="tool-btn" id="btnZoomInView" title="Přiblížit pohled">+</button>
+            <button class="tool-btn btn-fit" id="btnFitViewportRoute" title="Přizpůsobit trasu do okna">Fit</button>
           </div>
-          <select id="resSelect" class="tool-btn" style="background:var(--bg-input);">
-            <option value="1920x1080">1080p (1920x1080)</option>
-            <option value="3840x2160">4K UHD (3840x2160)</option>
+          <select id="resSelect" class="tool-btn res-select">
+            <option value="1920x1080">1080p</option>
+            <option value="3840x2160">4K UHD</option>
           </select>
-          <button class="tool-btn active" id="btnToggleChecker" title="Přepnout šachovnici pro průhlednost (Alpha)">
+          <button class="tool-btn active" id="btnToggleChecker" title="Přepnout mřížku pro průhlednost (Alpha)">
             🏁 Mřížka
           </button>
-          <button class="tool-btn" id="btnResetView" title="Resetovat pohled">
+          <button class="tool-btn" id="btnResetView" title="Resetovat transformaci">
             🔍 Reset
           </button>
         </div>
@@ -205,11 +202,11 @@
     <!-- RIGHT INSPECTOR PANEL (400px) -->
     <aside class="inspector-panel">
       <div class="inspector-tabs">
-        <div class="inspector-tab active" data-tab="tabProject">Trasa & Projekt</div>
-        <div class="inspector-tab" data-tab="tabStyles">Vzhled & Prvky</div>
-        <div class="inspector-tab" data-tab="tabMap">Mapa & Styl</div>
-        <div class="inspector-tab" data-tab="tabTelemetry">Telemetrie & Čas</div>
-        <div class="inspector-tab" data-tab="tabLandmarks">Body & Řeky</div>
+        <div class="inspector-tab active" data-tab="tabProject" title="Trasa & Projekt">📍 Trasa</div>
+        <div class="inspector-tab" data-tab="tabStyles" title="Vzhled & Prvky">🎨 Vzhled</div>
+        <div class="inspector-tab" data-tab="tabMap" title="Mapa & Styl">🗺️ Mapa</div>
+        <div class="inspector-tab" data-tab="tabTelemetry" title="Telemetrie & Čas">📊 Data</div>
+        <div class="inspector-tab" data-tab="tabLandmarks" title="Body zájmu & Řeky">🚩 Body</div>
       </div>
 
       <div class="inspector-content">

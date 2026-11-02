@@ -219,7 +219,19 @@ document.addEventListener('DOMContentLoaded', () => {
       state.projects = data.projects || [];
       renderProjectsList();
 
-      if (state.projects.length > 0 && !state.currentProjectId) {
+      if (state.projects.length === 0) {
+        const createResp = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Výlet Praha – České Budějovice', active_gpx: 'full_rekola_route.gpx' })
+        });
+        const createData = await createResp.json();
+        if (createData.project) {
+          state.projects = [createData.project];
+          renderProjectsList();
+          await switchProject(createData.project.id);
+        }
+      } else if (!state.currentProjectId) {
         await switchProject(state.projects[0].id);
       }
     } catch (err) {
