@@ -409,40 +409,91 @@ class CanvasRenderer {
     return this.camZoom;
   }
 
-  getTimeAtDist(distKm) {
-    if (!this.timeMilestones || this.timeMilestones.length === 0) {
-      const hours = distKm / 24.0;
-      const h = Math.floor(hours);
-      const m = Math.floor((hours - h) * 60);
-      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    }
-
-    const ms = [...this.timeMilestones].sort((a, b) => a.km - b.km);
-    if (distKm <= ms[0].km) return ms[0].time_str.substring(0, 5);
-    if (distKm >= ms[ms.length - 1].km) return ms[ms.length - 1].time_str.substring(0, 5);
-
+  getTimeAtDist(distKm, returnSeconds = false) {
     const toSec = (str) => {
+      if (!str) return 0;
       const p = str.split(':').map(Number);
       return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0);
     };
-    const toTimeStr = (sec) => {
-      sec = Math.round(sec);
-      const h = Math.floor(sec / 3600);
-      const m = Math.floor((sec % 3600) / 60);
+
+    const toTimeStr = (totalSec) => {
+      // Modulo 86400 to roll over smoothly into the 24-hour cycle
+      const secInDay = ((Math.round(totalSec) % 86400) + 86400) % 86400;
+      const h = Math.floor(secInDay / 3600);
+      const m = Math.floor((secInDay % 3600) / 60);
+      const s = Math.floor(secInDay % 60);
+      if (returnSeconds) {
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      }
       return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
     };
 
-    for (let i = 0; i < ms.length - 1; i++) {
-      const m0 = ms[i];
-      const m1 = ms[i + 1];
-      if (distKm >= m0.km && distKm <= m1.km) {
-        const ratio = (distKm - m0.km) / ((m1.km - m0.km) || 1);
-        const s0 = toSec(m0.time_str);
-        const s1 = toSec(m1.time_str);
-        return toTimeStr(s0 + (s1 - s0) * ratio);
+    const totalDist = (this.gpxData && this.gpxData.total_distance_km) || 100;
+    const startTimeStr = (this.clockConfig && this.clockConfig.startTime) || '08:30';
+    const finishTimeStr = (this.clockConfig && this.clockConfig.finishTime) || '15:45';
+
+    // Build timeline milestones sequence
+    let ms = [];
+    if (this.timeMilestones && this.timeMilestones.length > 0) {
+      ms = [...this.timeMilestones].map(m => ({
+        km: Number(m.km),
+        time_str: m.time_str || m.clock_time || '00:00'
+      })).sort((a, b) => a.km - b.km);
+
+      // Prepend start time if first milestone is not at start
+      if (ms[0].km > 0.05) {
+        ms.unshift({ km: 0, time_str: startTimeStr });
+      }
+      // Append finish time if last milestone is not at end
+      if (ms[ms.length - 1].km < totalDist - 0.05) {
+        ms.push({ km: totalDist, time_str: finishTimeStr });
+      }
+    } else {
+      // Default: 2 boundary points (Start and Finish)
+      ms = [
+        { km: 0, time_str: startTimeStr },
+        { km: totalDist, time_str: finishTimeStr }
+      ];
+    }
+
+    // Unwrap time across midnight to guarantee forward-only progression (no reverse countdown)
+    const unwrapped = [];
+    let currentDayOffset = 0;
+
+    for (let i = 0; i < ms.length; i++) {
+      const rawSec = toSec(ms[i].time_str);
+      if (i > 0) {
+        while ((rawSec + currentDayOffset) < unwrapped[i - 1].sec) {
+          // Time rolls over past midnight! Advance forward into the next day
+          currentDayOffset += 86400;
+        }
+      }
+      unwrapped.push({
+        km: ms[i].km,
+        sec: rawSec + currentDayOffset
+      });
+    }
+
+    // Interpolate along the unwrapped timeline
+    if (distKm <= unwrapped[0].km) {
+      return toTimeStr(unwrapped[0].sec);
+    }
+    if (distKm >= unwrapped[unwrapped.length - 1].km) {
+      return toTimeStr(unwrapped[unwrapped.length - 1].sec);
+    }
+
+    for (let i = 0; i < unwrapped.length - 1; i++) {
+      const u0 = unwrapped[i];
+      const u1 = unwrapped[i + 1];
+      if (distKm >= u0.km && distKm <= u1.km) {
+        const spanKm = (u1.km - u0.km) || 0.001;
+        const ratio = Math.max(0, Math.min(1, (distKm - u0.km) / spanKm));
+        const currentSec = u0.sec + (u1.sec - u0.sec) * ratio;
+        return toTimeStr(currentSec);
       }
     }
-    return ms[0].time_str.substring(0, 5);
+
+    return toTimeStr(unwrapped[0].sec);
   }
 
   getSmoothedPoints() {
@@ -2599,17 +2650,10 @@ class CanvasRenderer {
     ctx.fill();
     ctx.stroke();
 
-    // Interpolate ride time based on progress
-    const [startH, startM] = (this.clockConfig.startTime || '08:30').split(':').map(Number);
-    const [finH, finM] = (this.clockConfig.finishTime || '15:45').split(':').map(Number);
-    const startMins = startH * 60 + startM;
-    const finMins = finH * 60 + finM;
-    const curTotalMins = startMins + (finMins - startMins) * progress;
-    const curH = Math.floor(curTotalMins / 60) % 24;
-    const curM = Math.floor(curTotalMins % 60);
-    const curS = Math.floor((curTotalMins * 60) % 60);
-
-    const timeStr = `${String(curH).padStart(2, '0')}:${String(curM).padStart(2, '0')}:${String(curS).padStart(2, '0')}`;
+    // Interpolate ride time based on progress & distance (with full midnight rollover support)
+    const totalDist = (this.gpxData && this.gpxData.total_distance_km) || 100;
+    const curDist = Math.max(0, Math.min(totalDist, progress * totalDist));
+    const timeStr = this.getTimeAtDist(curDist, true);
 
     ctx.fillStyle = this.colors.textDim;
     ctx.font = `700 ${9.5 * s}px Inter, sans-serif`;

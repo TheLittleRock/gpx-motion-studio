@@ -226,6 +226,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (cDur) cDur.value = s.durationSec;
       updateTimeDisplay();
     }
+    if (s.clockConfig) {
+      renderer.clockConfig = { ...renderer.clockConfig, ...s.clockConfig };
+      if (clockStartTime && renderer.clockConfig.startTime) clockStartTime.value = renderer.clockConfig.startTime;
+      if (clockFinishTime && renderer.clockConfig.finishTime) clockFinishTime.value = renderer.clockConfig.finishTime;
+    }
     if (s.waypoints) {
       renderer.waypoints = JSON.parse(JSON.stringify(s.waypoints));
       updateWaypointsUI();
@@ -815,6 +820,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (s.viewportZoom) {
         renderer.viewportZoom = s.viewportZoom;
+      }
+      if (s.clockConfig) {
+        renderer.clockConfig = { ...renderer.clockConfig, ...s.clockConfig };
+        if (clockStartTime && renderer.clockConfig.startTime) clockStartTime.value = renderer.clockConfig.startTime;
+        if (clockFinishTime && renderer.clockConfig.finishTime) clockFinishTime.value = renderer.clockConfig.finishTime;
       }
 
       // Check Mapy API Key
@@ -1959,6 +1969,7 @@ document.addEventListener('DOMContentLoaded', () => {
               waypoints: renderer.waypoints,
               waypointOffsetSec: renderer.waypointOffsetSec,
               waypointDurationSec: renderer.waypointDurationSec,
+              clockConfig: renderer.clockConfig,
               landmarks: renderer.landmarks,
               disabledFeatures: Array.from(renderer.disabledFeatures || [])
             }
@@ -2180,8 +2191,20 @@ document.addEventListener('DOMContentLoaded', () => {
   toggleRiderDot.addEventListener('change', (e) => renderer.toggles.riderDot = e.target.checked);
   toggleBgMap.addEventListener('change', (e) => renderer.toggles.bgMap = e.target.checked);
 
-  clockStartTime.addEventListener('input', (e) => renderer.clockConfig.startTime = e.target.value);
-  clockFinishTime.addEventListener('input', (e) => renderer.clockConfig.finishTime = e.target.value);
+  if (clockStartTime) {
+    clockStartTime.addEventListener('input', (e) => {
+      renderer.clockConfig.startTime = e.target.value;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (clockFinishTime) {
+    clockFinishTime.addEventListener('input', (e) => {
+      renderer.clockConfig.finishTime = e.target.value;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
 
   // Kilometer-based Trim synchronization & Mode
   const trimInKmInput = document.getElementById('trimInKmInput');
@@ -3868,6 +3891,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const list = data.milestones || [];
       renderer.timeMilestones = list;
       renderMilestonesList(list);
+      if (!state.isPlaying) renderer.render();
     } catch (err) {
       console.warn('Error loading milestones:', err);
     }
@@ -3884,10 +3908,11 @@ document.addEventListener('DOMContentLoaded', () => {
     milestones.forEach(m => {
       const item = document.createElement('div');
       item.className = 'milestone-card-item';
+      const timeDisplay = m.time_str || m.clock_time || '00:00';
       item.innerHTML = `
         <div class="milestone-card-info">
-          <div class="milestone-card-title">${m.label || 'Milník'}</div>
-          <div class="milestone-card-meta">${Number(m.km).toFixed(1)} km ➔ ${m.clock_time}</div>
+          <div class="milestone-card-title">${m.label || m.note || 'Milník'}</div>
+          <div class="milestone-card-meta">${Number(m.km).toFixed(1)} km ➔ ${timeDisplay}</div>
         </div>
         <div class="milestone-card-actions">
           <button class="btn btn-secondary btn-del-milestone" style="padding:2px 6px; font-size:10px; color:var(--accent-danger);" title="Smazat">&times;</button>
