@@ -3733,6 +3733,10 @@ document.addEventListener('DOMContentLoaded', () => {
       offRenderer.trimMode = state.trimMode;
       offRenderer.waypointOffsetSec = renderer.waypointOffsetSec;
       offRenderer.waypointDurationSec = renderer.waypointDurationSec;
+      offRenderer.minimapMode = renderer.minimapMode;
+      offRenderer.minimapFollowZoom = renderer.minimapFollowZoom;
+      offRenderer.pulseSpeed = renderer.pulseSpeed;
+      offRenderer.textContrastStyle = renderer.textContrastStyle;
       offRenderer.progressTable = updateSpeedProgressTable();
 
       // 2B. Pre-cache all required map tiles if background map is enabled
