@@ -384,6 +384,13 @@ class ProjectDatabase:
             del item["data_json"]
             return item
 
+    def update_snapshot(self, snapshot_id, name):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE snapshots SET name = ? WHERE id = ?", (name, snapshot_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
     def delete_snapshot(self, snapshot_id):
         with self.get_connection() as conn:
             cursor = conn.cursor()

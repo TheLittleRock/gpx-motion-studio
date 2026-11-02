@@ -1,6 +1,6 @@
 /**
  * GPX & Map Motion Graphics Studio v2 — Professional Canvas Motion Graphics Engine
- * Supports 4 Animation Modes, 2 Core Map Styles (Mapy Panorama / GTA Radar Vector),
+ * Supports 4 Animation Modes, 2 Core Map Styles (Mapy Panorama / Transparent Vector Map),
  * Catmull-Rom Spline Rivers, Smart Label Collision Detection, On-Canvas Drag & Scale Gizmo,
  * Tabular Typography with Fixed Alignment, Departure/Arrival Pinging, and Animated Clock Widget.
  */
@@ -50,7 +50,7 @@ class CanvasRenderer {
     
     // Map Styles:
     // 'panorama'   (Style A: Mapy.com High-Res 16:9 Panorama)
-    // 'vector'     (Style B: Minimalist Transparent "GTA Radar" Vector Map)
+    // 'vector'     (Style B: Minimalist Transparent Vector Map)
     this.mapStyle = 'panorama';
     this.vectorLayers = null;
     this.vectorLod = 'auto'; // 'auto', 'macro', 'regional', 'city'
@@ -98,15 +98,26 @@ class CanvasRenderer {
 
     // Vector LOD Layer Management
     this.lod = {
+      density: 3,
       lakes_dams: true,
-      rivers: false, // auto-off on Mapy.com raster to prevent duplicate rivers
+      lakesOpacity: 0.35,
+      rivers: true,
+      riverFilterRank: 3,
+      riverOpacity: 0.35,
+      riverWidth: 2.5,
       motorways: true,
       primary_roads: true,
       local_roads: false,
       paths: false,
       settlements: true,
-      lakesOpacity: 0.50,
-      riversWidth: 3.0
+      citiesVisible: true,
+      colorCities: '#ffffff',
+      townsVisible: true,
+      colorTowns: '#cbd5e1',
+      villagesVisible: true,
+      colorVillages: '#94a3b8',
+      landmarksVisible: true,
+      colorLandmarks: '#38bdf8'
     };
 
     // Zoom Ramp Curve & 4 Broadcast Presets
@@ -190,10 +201,14 @@ class CanvasRenderer {
     
     // Spotlight Mode Settings
     this.spotlight = {
-      targetLat: 49.414,
-      targetLon: 14.660,
-      targetName: 'Tábor (Hrad Kotnov)',
-      zoomLevel: 3.5,
+      targetLat: 50.068281,
+      targetLon: 14.424340,
+      targetName: 'Praha (Vyšehrad)',
+      startZoom: 8.0,
+      zoomLevel: 16.0,
+      direction: 'in',
+      easing: 'smooth',
+      endingRebound: true,
       showRoute: true
     };
     
@@ -571,7 +586,12 @@ class CanvasRenderer {
           img.crossOrigin = 'anonymous';
           entry = { img, loaded: false };
           this.tileCache.set(key, entry);
-          img.onload = () => { entry.loaded = true; };
+          img.onload = () => {
+            entry.loaded = true;
+            if (typeof this.onTileLoaded === 'function') {
+              this.onTileLoaded();
+            }
+          };
           img.onerror = () => { entry.error = true; };
           img.src = `/api/tiles/${provider}/${z}/${x}/${y}`;
         }
@@ -603,16 +623,71 @@ class CanvasRenderer {
     };
   }
 
+  drawCityLabel(ctx, x, y, name, rank, s, category = 'town') {
+    if (x < -150 || x > this.width + 150 || y < -100 || y > this.height + 100) return;
+
+    ctx.save();
+    let fontSize = 11;
+    let dotRadius = 2.5;
+    let labelColor = (this.lod && this.lod.colorTowns) || '#cbd5e1';
+    let fontWeight = '600';
+
+    if (rank === 1) {
+      fontSize = 13.5;
+      dotRadius = 3.5;
+      labelColor = (this.lod && this.lod.colorCities) || '#ffffff';
+      fontWeight = '800';
+    } else if (rank === 2) {
+      fontSize = 11.5;
+      dotRadius = 2.5;
+      labelColor = (this.lod && this.lod.colorTowns) || '#cbd5e1';
+      fontWeight = '700';
+    } else {
+      fontSize = 10;
+      dotRadius = 2;
+      labelColor = (this.lod && this.lod.colorVillages) || '#94a3b8';
+      fontWeight = '600';
+    }
+
+    if (category === 'castle' || category === 'peak') {
+      labelColor = (this.lod && this.lod.colorLandmarks) || '#38bdf8';
+    }
+
+    // Dot marker with halo
+    ctx.fillStyle = labelColor;
+    ctx.beginPath();
+    ctx.arc(x, y, dotRadius * s, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Text Label with dark contrast drop-shadow
+    ctx.font = `${fontWeight} ${fontSize * s}px Inter, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+    ctx.shadowBlur = 4 * s;
+    ctx.lineWidth = 2.5 * s;
+    ctx.strokeStyle = 'rgba(15, 17, 21, 0.85)';
+    ctx.strokeText(name, x + 6 * s, y);
+
+    ctx.shadowColor = 'transparent';
+    ctx.fillText(name, x + 6 * s, y);
+
+    ctx.restore();
+  }
+
   // --- VECTOR LOD LAYERS ---
   drawLODLayers(ctx, toScreen) {
     if (!this.vectorLayers) return;
     const layers = this.vectorLayers;
     const s = this.hudScale;
+    const density = (this.lod && this.lod.density !== undefined) ? this.lod.density : 3;
 
     // 1. Water Bodies: Lakes & Dams
-    if (this.lod.lakes_dams && layers.lakes_dams) {
-      ctx.fillStyle = this.hexToRgba(this.colors.river, this.lod.lakesOpacity || 0.45);
-      ctx.strokeStyle = this.colors.river;
+    if (this.lod && this.lod.lakes_dams !== false && layers.lakes_dams) {
+      const lakesOpacity = (this.lod && this.lod.lakesOpacity !== undefined) ? this.lod.lakesOpacity : 0.35;
+      ctx.fillStyle = this.hexToRgba(this.colors.river || '#38bdf8', lakesOpacity);
+      ctx.strokeStyle = this.hexToRgba(this.colors.river || '#38bdf8', Math.min(1.0, lakesOpacity + 0.2));
       ctx.lineWidth = 1.2 * s;
       for (const l of layers.lakes_dams) {
         if (!l.points || l.points.length < 3) continue;
@@ -628,14 +703,19 @@ class CanvasRenderer {
       }
     }
 
-    // 2. Rivers
-    if (this.lod.rivers && layers.rivers) {
-      ctx.strokeStyle = this.colors.river;
-      ctx.lineWidth = (this.lod.riversWidth || 3.0) * s;
+    // 2. Rivers (Soft background, single draw, configurable opacity & width & rank)
+    if (this.lod && this.lod.rivers !== false && layers.rivers) {
+      const rOpacity = (this.lod && this.lod.riverOpacity !== undefined) ? this.lod.riverOpacity : 0.35;
+      const rWidth = (this.lod && this.lod.riverWidth !== undefined) ? this.lod.riverWidth : 2.5;
+      const filterRank = (this.lod && this.lod.riverFilterRank !== undefined) ? this.lod.riverFilterRank : 3;
+
+      ctx.strokeStyle = this.hexToRgba(this.colors.river || '#38bdf8', rOpacity);
+      ctx.lineWidth = rWidth * s;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       for (const r of layers.rivers) {
         if (!r.points || r.points.length < 2) continue;
+        if (r.rank && r.rank > filterRank) continue;
         ctx.beginPath();
         for (let i = 0; i < r.points.length; i++) {
           const pt = toScreen(r.points[i].mx, r.points[i].my);
@@ -666,7 +746,7 @@ class CanvasRenderer {
     }
 
     // 4. Motorways (Dual Casing)
-    if (this.lod.motorways && layers.motorways) {
+    if (this.lod && this.lod.motorways !== false && layers.motorways) {
       for (const m of layers.motorways) {
         if (!m.points || m.points.length < 2) continue;
         ctx.beginPath();
@@ -686,7 +766,7 @@ class CanvasRenderer {
     }
 
     // 5. Primary Roads
-    if (this.lod.primary_roads && layers.primary_roads) {
+    if (this.lod && this.lod.primary_roads !== false && layers.primary_roads) {
       ctx.strokeStyle = 'rgba(148, 163, 184, 0.65)';
       ctx.lineWidth = 2.5 * s;
       for (const pr of layers.primary_roads) {
@@ -702,7 +782,7 @@ class CanvasRenderer {
     }
 
     // 6. Local Roads
-    if (this.lod.local_roads && layers.local_roads) {
+    if (this.lod && this.lod.local_roads && layers.local_roads) {
       ctx.strokeStyle = 'rgba(100, 116, 139, 0.45)';
       ctx.lineWidth = 1.5 * s;
       for (const lr of layers.local_roads) {
@@ -718,7 +798,7 @@ class CanvasRenderer {
     }
 
     // 7. Paths (Cycle / Pedestrian)
-    if (this.lod.paths && layers.paths) {
+    if (this.lod && this.lod.paths && layers.paths) {
       ctx.strokeStyle = '#39ff14';
       ctx.lineWidth = 1.8 * s;
       ctx.setLineDash([4 * s, 4 * s]);
@@ -735,19 +815,33 @@ class CanvasRenderer {
       ctx.setLineDash([]);
     }
 
-    // 8. Settlements & Towns
-    if (this.lod.settlements && layers.places) {
+    // 8. Settlements & Towns (Governed by LOD density slider & category toggles)
+    if (this.lod && this.lod.settlements !== false && layers.places) {
       for (const pl of layers.places) {
+        if (pl.rank > density) continue;
+        if (pl.rank === 1 && this.lod.citiesVisible === false) continue;
+        if (pl.rank === 2 && this.lod.townsVisible === false) continue;
+        if (pl.rank >= 3 && this.lod.villagesVisible === false) continue;
+
         const pt = toScreen(pl.mx, pl.my);
-        this.drawCityLabel(ctx, pt.x, pt.y, pl.name, pl.rank, s);
+        this.drawCityLabel(ctx, pt.x, pt.y, pl.name, pl.rank, s, pl.type || 'town');
+      }
+    }
+
+    // 9. Landmarks (Castles, Peaks, Viewpoints)
+    if (this.lod && this.lod.landmarksVisible !== false && layers.landmarks) {
+      for (const lm of layers.landmarks) {
+        const pt = toScreen(lm.mx, lm.my);
+        this.drawCityLabel(ctx, pt.x, pt.y, lm.name, 2, s, lm.category || 'castle');
       }
     }
   }
+
   // --- MODE 1: TELEMETRY HUD (ALPHA OVERLAY) ---
   renderModeHUD(idx0, interp, curMercX, curMercY, progress, dist, ele, grade) {
     const ctx = this.ctx;
-    // Optional Photo Backdrop or Map Image
-    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : ((this.mapLoaded && this.mapImage) ? this.mapImage : null);
+    // Optional Photo Backdrop (User uploaded drone/camera photo)
+    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : null;
     if (bgImg) {
       ctx.save();
       ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));
@@ -825,7 +919,7 @@ class CanvasRenderer {
     };
 
     // 0. Optional Backdrop Image (Drone photo / custom background)
-    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : ((this.mapLoaded && this.mapImage) ? this.mapImage : null);
+    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : null;
     if (bgImg) {
       ctx.save();
       ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));
@@ -836,9 +930,13 @@ class CanvasRenderer {
       ctx.restore();
     }
 
-    // 1. Background Map (Style A Tile Engine or Map Image or Style B Vector)
+    // 1. Background Map (Style A Tile Engine or Style B Vector)
     if (this.toggles.bgMap) {
       if (this.mapStyle === 'vector') {
+        if (!bgImg && this.vectorTheme === 'dark') {
+          ctx.fillStyle = '#0f1115';
+          ctx.fillRect(0, 0, w, h);
+        }
         if (this.vectorLayers) {
           this.drawLODLayers(ctx, toScreen);
         }
@@ -857,11 +955,6 @@ class CanvasRenderer {
         ctx.fillStyle = 'rgba(10, 14, 20, 0.35)';
         ctx.fillRect(0, 0, w, h);
       }
-    }
-
-    // 2. Vector LOD Layers overlay
-    if (this.vectorLayers) {
-      this.drawLODLayers(ctx, toScreen);
     }
 
     // 3. Full Route Underlay (Smoothed)
@@ -921,13 +1014,18 @@ class CanvasRenderer {
       }
     }
 
-    // 8. Custom Waypoint Callouts
+    // 8. Custom Waypoint Callouts & Permanent Route Pins
     if (this.toggles.waypoints && this.waypoints) {
       for (const wp of this.waypoints) {
-        if (dist >= wp.dist_km - 2.0 && dist <= wp.dist_km + 4.0) {
-          const wpIdx = Math.min(n - 1, Math.max(0, Math.floor((wp.dist_km / (points[n - 1].dist_km || 1)) * (n - 1))));
-          const wpPt = toScreen(points[wpIdx].merc_x, points[wpIdx].merc_y);
-          const pop = Math.min(1.0, (dist - (wp.dist_km - 2.0)) / 1.0);
+        const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.dist_km || 0) / (points[n - 1].dist_km || 1)) * (n - 1))));
+        const wpPt = toScreen(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        
+        // Permanent waypoint pin on the route line
+        this.drawWaypointRoutePin(ctx, wpPt.x, wpPt.y, wp, s);
+
+        // Animated callout card when rider approaches this point
+        if (dist >= (wp.dist_km || 0) - 2.5 && dist <= (wp.dist_km || 0) + 4.5) {
+          const pop = Math.min(1.0, (dist - ((wp.dist_km || 0) - 2.5)) / 1.0);
           this.drawWaypointCard(ctx, wpPt.x, wpPt.y, wp.title, wp.desc || wp.subtitle, s, pop);
         }
       }
@@ -947,6 +1045,31 @@ class CanvasRenderer {
     ctx.restore();
   }
 
+  drawWaypointRoutePin(ctx, x, y, wp, s) {
+    ctx.save();
+    ctx.fillStyle = '#f59e0b'; // Amber milestone pin
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.8 * s;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+    ctx.shadowBlur = 6 * s;
+
+    ctx.beginPath();
+    ctx.arc(x, y, 5.5 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Subtle label above pin
+    ctx.font = `700 ${9 * s}px Inter, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = '#f0f6fc';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+    ctx.shadowBlur = 4 * s;
+    ctx.fillText(wp.title || 'Bod', x, y - 7 * s);
+
+    ctx.restore();
+  }
+
   // --- MODE 4: LOCATION SPOTLIGHT / ZOOM-IN ---
   renderModeSpotlight(progress) {
     const ctx = this.ctx;
@@ -957,22 +1080,44 @@ class CanvasRenderer {
     ctx.save();
 
     const t = Math.max(0, Math.min(1, progress));
-    const smoothT = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
-    // Ending Rebound / Push-out animation
-    let rebound = 0;
-    if (this.spotlight.endingRebound && t > 0.80) {
-      const rt = (t - 0.80) / 0.20;
-      rebound = Math.sin(rt * Math.PI) * 0.15; // smooth 15% pulse-back
+    
+    // Configurable Easing calculation for Speed Ramping
+    let smoothT = t;
+    const easing = (this.spotlight && this.spotlight.easing) || 'smooth';
+    if (easing === 'ease-in') {
+      smoothT = Math.pow(t, 2.5); // Smooth acceleration
+    } else if (easing === 'ease-out') {
+      smoothT = 1 - Math.pow(1 - t, 2.5); // Smooth deceleration into target
+    } else if (easing === 'punch') {
+      smoothT = Math.pow(t, 4.0); // Dramatic fast snap
+    } else if (easing === 'linear') {
+      smoothT = t;
+    } else { // 'smooth' (S-curve smoothstep)
+      smoothT = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
     }
 
-    const targetZoomLevel = this.spotlight.zoomLevel || 14.0;
-    const startZoomLevel = Math.max(7, targetZoomLevel - 4.5);
-    const currentZoom = startZoomLevel + (targetZoomLevel - startZoomLevel) * smoothT - (rebound * targetZoomLevel);
+    // Ending Rebound / Cushion animation
+    let rebound = 0;
+    if (this.spotlight && this.spotlight.endingRebound && t > 0.70) {
+      const rt = (t - 0.70) / 0.30;
+      rebound = Math.sin(rt * Math.PI) * 0.10; // 10% subtle rebound push
+    }
 
-    const targetMerc = this.latLonToMercator(this.spotlight.targetLat, this.spotlight.targetLon);
+    const startZoom = (this.spotlight && this.spotlight.startZoom) || 8.0;
+    const targetZoom = (this.spotlight && this.spotlight.zoomLevel) || 16.0;
+    const isZoomIn = !this.spotlight || this.spotlight.direction !== 'out';
 
-    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : ((this.mapLoaded && this.mapImage) ? this.mapImage : null);
+    // In Zoom In mode: starts at wide overview (startZoom) and dives down into detailed target (targetZoom)
+    const zoomRange = targetZoom - startZoom;
+    const currentZoom = isZoomIn
+      ? (startZoom + zoomRange * smoothT - rebound * zoomRange)
+      : (targetZoom - zoomRange * smoothT + rebound * zoomRange);
+
+    const targetLat = (this.spotlight && this.spotlight.targetLat) || 50.068281;
+    const targetLon = (this.spotlight && this.spotlight.targetLon) || 14.424340;
+    const targetMerc = this.latLonToMercator(targetLat, targetLon);
+
+    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : null;
     if (bgImg) {
       ctx.save();
       ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));
@@ -987,7 +1132,7 @@ class CanvasRenderer {
       if (this.mapStyle === 'mapy' || this.mapStyle === 'panorama') {
         this.drawSlippyMap(ctx, targetMerc.x, targetMerc.y, currentZoom, w, h);
       } else {
-        if (!bgImg) {
+        if (!bgImg && this.vectorTheme === 'dark') {
           ctx.fillStyle = '#0f1115';
           ctx.fillRect(0, 0, w, h);
         }
@@ -1002,12 +1147,12 @@ class CanvasRenderer {
     });
 
     // Vector LOD layers
-    if (this.vectorLayers) {
+    if (this.vectorLayers && (this.mapStyle === 'vector' || this.toggles.bgMap)) {
       this.drawLODLayers(ctx, toScreen);
     }
 
     // Smoothed route underlay
-    if (this.spotlight.showRoute && this.gpxData && this.gpxData.points) {
+    if (this.spotlight && this.spotlight.showRoute && this.gpxData && this.gpxData.points) {
       const points = this.getSmoothedPoints();
       ctx.beginPath();
       for (let i = 0; i < points.length; i++) {
@@ -1050,7 +1195,7 @@ class CanvasRenderer {
     ctx.fillText(`${this.spotlight.targetLat.toFixed(5)}°N, ${this.spotlight.targetLon.toFixed(5)}°E • Detail ${currentZoom.toFixed(1)}x`, cardX + cardW / 2, cardY + 50 * s);
   }
 
-  // --- STYLE B: GTA RADAR VECTOR MAP RENDERER ---
+  // --- STYLE B: TRANSPARENT VECTOR MAP RENDERER ---
   renderVectorMapCorridor(ctx, w, h) {
     if (!this.vectorLayers) return;
     const layers = this.vectorLayers;
@@ -1125,7 +1270,7 @@ class CanvasRenderer {
       }
     }
 
-    // 4. Motorways (GTA Dual-Casing)
+    // 4. Motorways (Dual-Casing)
     if (layers.motorways) {
       // Outer casing
       ctx.strokeStyle = 'rgba(240, 246, 252, 0.70)';
@@ -1445,7 +1590,23 @@ class CanvasRenderer {
       y: offsetY + (my - b.min_my) * scale
     });
 
-    // 1. Rivers
+    // 1. Water Bodies: Lakes & Dams on Minimap
+    if (this.lod && this.lod.lakes_dams !== false && this.vectorLayers && this.vectorLayers.lakes_dams) {
+      ctx.fillStyle = this.hexToRgba(this.colors.river || '#38bdf8', (this.lod.lakesOpacity || 0.35) * 0.8);
+      for (const l of this.vectorLayers.lakes_dams) {
+        if (!l.points || l.points.length < 3) continue;
+        ctx.beginPath();
+        for (let i = 0; i < l.points.length; i++) {
+          const pt = toMiniMap(l.points[i].mx, l.points[i].my);
+          if (i === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // 2. Rivers
     if (this.toggles.rivers && this.rivers) {
       ctx.strokeStyle = this.colors.river;
       ctx.lineWidth = Math.max(2, 2.5 * s);
@@ -1461,7 +1622,31 @@ class CanvasRenderer {
       }
     }
 
-    // 2. Full Route Muted Underlay
+    // 3. Settlements / Towns on Minimap
+    if (this.vectorLayers && this.vectorLayers.places && this.lod && this.lod.settlements !== false) {
+      const density = (this.lod && this.lod.density !== undefined) ? this.lod.density : 3;
+      for (const pl of this.vectorLayers.places) {
+        if (pl.rank > Math.min(3, density)) continue;
+        const pt = toMiniMap(pl.mx, pl.my);
+        if (pt.x < boxX + 6 || pt.x > boxX + boxW - 6 || pt.y < boxY + 6 || pt.y > boxY + boxH - 6) continue;
+        
+        ctx.save();
+        ctx.fillStyle = pl.rank === 1 ? ((this.lod && this.lod.colorCities) || '#ffffff') : ((this.lod && this.lod.colorTowns) || '#cbd5e1');
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, (pl.rank === 1 ? 2.5 : 1.8) * s, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.font = `600 ${(pl.rank === 1 ? 8.5 : 7.2) * s}px Inter, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+        ctx.shadowBlur = 3 * s;
+        ctx.fillText(pl.name, pt.x, pt.y - 3 * s);
+        ctx.restore();
+      }
+    }
+
+    // 4. Full Route Muted Underlay
     const points = this.gpxData.points;
     const n = points.length;
 
@@ -1477,7 +1662,7 @@ class CanvasRenderer {
     ctx.lineJoin = 'round';
     ctx.stroke();
 
-    // 3. Active Glowing Path
+    // 5. Active Glowing Path
     ctx.save();
     if (this.colors.glowIntensity > 0) {
       ctx.shadowColor = this.colors.path;
@@ -1498,17 +1683,38 @@ class CanvasRenderer {
     ctx.stroke();
     ctx.restore();
 
-    // 4. Pulsing Rider Beacon
+    // 6. Waypoints Pins on Minimap
+    if (this.toggles.waypoints && this.waypoints) {
+      for (const wp of this.waypoints) {
+        const wpIdx = Math.min(n - 1, Math.max(0, Math.floor(((wp.dist_km || 0) / (points[n - 1].dist_km || 1)) * (n - 1))));
+        const pt = toMiniMap(points[wpIdx].merc_x, points[wpIdx].merc_y);
+        ctx.save();
+        ctx.fillStyle = '#f59e0b';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1 * s;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 2.8 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // 7. Pulsing Rider Beacon
     if (this.toggles.riderDot) {
       this.drawPulsingRiderDot(ctx, riderScreenPt.x, riderScreenPt.y, s);
     }
 
     ctx.restore(); // clip
 
-    // Header label
+    // Header label - strictly left-aligned with card
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = this.colors.textDim;
     ctx.font = `700 ${10 * s}px Inter, sans-serif`;
     ctx.fillText("MINIMAPA TRASY", boxX + 16 * s, boxY + 22 * s);
+    ctx.restore();
 
     ctx.restore();
   }
@@ -1673,10 +1879,14 @@ class CanvasRenderer {
     ctx.fill();
     ctx.stroke();
 
-    // Header label
+    // Header label - strictly left-aligned with card
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = this.colors.textDim;
     ctx.font = `700 ${9.5 * s}px Inter, sans-serif`;
     ctx.fillText("TELEMETRIE JÍZDY", cardX + 18 * s, cardY + 22 * s);
+    ctx.restore();
 
     const colW = (cardW - 36 * s) / 3;
 
@@ -1909,7 +2119,7 @@ class CanvasRenderer {
     }
 
     // 0. Optional Backdrop Image (Drone photo / custom background)
-    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : ((this.mapLoaded && this.mapImage) ? this.mapImage : null);
+    const bgImg = (this.backdropImage && this.backdropLoaded) ? this.backdropImage : null;
     if (bgImg) {
       ctx.save();
       ctx.globalAlpha = Math.max(0.1, Math.min(1.0, this.backdropOpacity || 0.65));

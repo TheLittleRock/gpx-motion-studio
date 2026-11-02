@@ -1,5 +1,5 @@
 """
-Vector Map Engine for Style B: Minimalist Transparent "GTA Radar" Vector Map
+Vector Map Engine for Style B: Minimalist Transparent Vector Map
 Provides multi-layered vector geometries (Water bodies, Dams/Lakes, Rivers, Motorways with dual-casing,
 Primary/Secondary/Local Roads, Paths, Urban Areas, and Towns) cached locally in SQLite.
 """
@@ -128,7 +128,7 @@ LAKES_DAMS_DATA = [
     }
 ]
 
-# Major Highways & Motorways along the corridor (GTA dual-cased style)
+# Major Highways & Motorways along the corridor (Dual-cased style)
 HIGHWAYS_DATA = [
     {
         "ref": "D3",
@@ -216,7 +216,7 @@ RAILWAYS_DATA = [
     }
 ]
 
-# Urban Built-up Areas (Polygons for GTA Radar city footprints)
+# Urban Built-up Areas (Polygons for city footprints)
 URBAN_AREAS_DATA = [
     {
         "name": "Praha",
@@ -346,7 +346,9 @@ class VectorMapEngine:
             "railways": [{"name": rw["name"], "points": to_merc_coords(rw["coords"])} for rw in RAILWAYS_DATA],
             "urban_areas": [{"name": u["name"], "points": to_merc_coords(u["coords"])} for u in URBAN_AREAS_DATA],
             "places": [{"name": pl["name"], "rank": pl["rank"], "lat": pl["lat"], "lon": pl["lon"], "type": pl["type"],
-                        "mx": lat_lon_to_mercator(pl["lat"], pl["lon"])[0], "my": lat_lon_to_mercator(pl["lat"], pl["lon"])[1]} for pl in RANKED_PLACES]
+                        "mx": lat_lon_to_mercator(pl["lat"], pl["lon"])[0], "my": lat_lon_to_mercator(pl["lat"], pl["lon"])[1]} for pl in RANKED_PLACES],
+            "landmarks": [{"name": lm["name"], "category": lm.get("category", "landmark"), "lat": lm["lat"], "lon": lm["lon"], "subtitle": lm.get("subtitle", ""),
+                           "mx": lat_lon_to_mercator(lm["lat"], lm["lon"])[0], "my": lat_lon_to_mercator(lm["lat"], lm["lon"])[1]} for lm in CORRIDOR_LANDMARKS]
         }
         return layers
 

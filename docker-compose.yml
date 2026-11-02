@@ -16,6 +16,16 @@ services:
       - ./exports:/app/exports
       # Optional local GPX route files
       - ./assets:/app/assets
+      # Live application mounts
+      - ./static:/app/static
+      - ./server.py:/app/server.py
+      - ./database.py:/app/database.py
+      - ./vector_map_engine.py:/app/vector_map_engine.py
+      - ./tile_service.py:/app/tile_service.py
+      - ./gpx_parser.py:/app/gpx_parser.py
+      - ./fusion_generator.py:/app/fusion_generator.py
+      - ./map_stitcher.py:/app/map_stitcher.py
+      - ./landmarks_data.py:/app/landmarks_data.py
     environment:
       - PYTHONUNBUFFERED=1
     healthcheck:

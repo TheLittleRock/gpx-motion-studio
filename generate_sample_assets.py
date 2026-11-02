@@ -43,7 +43,7 @@ def stitch_map(min_lat, max_lat, min_lon, max_lon, zoom, output_path):
     
     for tx in range(min_x, max_x + 1):
         for ty in range(min_y, max_y + 1):
-            url = f"https://a.basemaps.cartocdn.com/rastertiles/voyager/{zoom}/{tx}/{ty}.png"
+            url = f"https://tile.openstreetmap.org/{zoom}/{tx}/{ty}.png"
             req = urllib.request.Request(url, headers=headers)
             try:
                 with urllib.request.urlopen(req, timeout=8) as resp:

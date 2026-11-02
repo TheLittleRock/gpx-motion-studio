@@ -7,6 +7,9 @@
 document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('renderCanvas');
   const renderer = new CanvasRenderer(canvas);
+  renderer.onTileLoaded = () => {
+    if (!state.isPlaying) renderer.render();
+  };
 
   // App State
   const state = {
@@ -20,8 +23,151 @@ document.addEventListener('DOMContentLoaded', () => {
     isDraggingScrubber: false,
     checkerboard: true,
     currentProjectId: null,
-    projects: []
+    projects: [],
+    trimMode: 'slice' // 'slice' | 'fit'
   };
+
+  // Undo / Redo History Stack
+  const undoStack = [];
+  const redoStack = [];
+  const MAX_HISTORY = 40;
+
+  function captureCurrentState(description = '') {
+    return {
+      description,
+      colors: JSON.parse(JSON.stringify(renderer.colors)),
+      hudScale: renderer.hudScale,
+      hudLayout: JSON.parse(JSON.stringify(renderer.hudLayout)),
+      toggles: JSON.parse(JSON.stringify(renderer.toggles)),
+      lod: JSON.parse(JSON.stringify(renderer.lod || {})),
+      mapStyle: renderer.mapStyle,
+      animationMode: renderer.animationMode,
+      trimIn: renderer.trimIn,
+      trimOut: renderer.trimOut,
+      trimMode: state.trimMode,
+      durationSec: state.durationSec,
+      waypoints: JSON.parse(JSON.stringify(renderer.waypoints || [])),
+      spotlight: JSON.parse(JSON.stringify(renderer.spotlight || {})),
+      speedKeyframes: JSON.parse(JSON.stringify(speedKeyframes || [])),
+      zoomKeyframes: JSON.parse(JSON.stringify(renderer.zoomKeyframes || []))
+    };
+  }
+
+  function saveStateForUndo(actionDescription = '') {
+    undoStack.push(captureCurrentState(actionDescription));
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    redoStack.length = 0;
+  }
+
+  function applyHistoryState(s) {
+    if (!s) return;
+    if (s.colors) {
+      renderer.colors = JSON.parse(JSON.stringify(s.colors));
+      if (colorPath) { colorPath.value = renderer.colors.path; colorPathVal.textContent = renderer.colors.path.toUpperCase(); }
+      if (colorElevation) { colorElevation.value = renderer.colors.elevation; colorElevationVal.textContent = renderer.colors.elevation.toUpperCase(); }
+      if (colorText) { colorText.value = renderer.colors.text; colorTextVal.textContent = renderer.colors.text.toUpperCase(); }
+      if (colorRiver) { colorRiver.value = renderer.colors.river; colorRiverVal.textContent = renderer.colors.river.toUpperCase(); }
+      const colorUnitsEl = document.getElementById('colorUnits');
+      const colorUnitsValEl = document.getElementById('colorUnitsVal');
+      if (colorUnitsEl && renderer.colors.units) {
+        colorUnitsEl.value = renderer.colors.units;
+        if (colorUnitsValEl) colorUnitsValEl.textContent = renderer.colors.units.toUpperCase();
+      }
+    }
+    if (s.hudScale) {
+      renderer.hudScale = s.hudScale;
+      if (hudScaleSlider) hudScaleSlider.value = s.hudScale;
+      if (hudScaleVal) hudScaleVal.textContent = `${s.hudScale.toFixed(2)}x`;
+    }
+    if (s.hudLayout) renderer.hudLayout = JSON.parse(JSON.stringify(s.hudLayout));
+    if (s.toggles) renderer.toggles = JSON.parse(JSON.stringify(s.toggles));
+    if (s.lod) renderer.lod = JSON.parse(JSON.stringify(s.lod));
+    if (s.mapStyle) {
+      renderer.mapStyle = s.mapStyle;
+      if (btnStylePanorama) btnStylePanorama.classList.toggle('active', s.mapStyle === 'panorama');
+      if (btnStyleVector) btnStyleVector.classList.toggle('active', s.mapStyle === 'vector');
+    }
+    if (s.animationMode) {
+      renderer.animationMode = s.animationMode;
+      if (animModeSelect) animModeSelect.value = s.animationMode;
+    }
+    if (s.trimIn !== undefined) {
+      renderer.trimIn = s.trimIn;
+      if (trimInSlider) trimInSlider.value = Math.round(s.trimIn * 100);
+    }
+    if (s.trimOut !== undefined) {
+      renderer.trimOut = s.trimOut;
+      if (trimOutSlider) trimOutSlider.value = Math.round(s.trimOut * 100);
+    }
+    if (s.trimMode) {
+      state.trimMode = s.trimMode;
+      const bSlice = document.getElementById('btnTrimModeSlice');
+      const bFit = document.getElementById('btnTrimModeFit');
+      if (bSlice) bSlice.classList.toggle('active', s.trimMode === 'slice');
+      if (bFit) bFit.classList.toggle('active', s.trimMode === 'fit');
+    }
+    if (s.durationSec) {
+      state.durationSec = s.durationSec;
+      const cDur = document.getElementById('customDurationInput');
+      if (cDur) cDur.value = s.durationSec;
+      updateTimeDisplay();
+    }
+    if (s.waypoints) {
+      renderer.waypoints = JSON.parse(JSON.stringify(s.waypoints));
+      updateWaypointsUI();
+      renderTimelineWaypoints();
+    }
+    if (s.spotlight) renderer.spotlight = JSON.parse(JSON.stringify(s.spotlight));
+    if (s.speedKeyframes) {
+      speedKeyframes = JSON.parse(JSON.stringify(s.speedKeyframes));
+      drawSpeedCurve();
+    }
+    if (s.zoomKeyframes) {
+      renderer.zoomKeyframes = JSON.parse(JSON.stringify(s.zoomKeyframes));
+      drawZoomCurve();
+    }
+    if (!state.isPlaying) renderer.render();
+  }
+
+  function undo() {
+    if (undoStack.length === 0) {
+      showToast('ℹ️ Žádné další akce k vrácení');
+      return;
+    }
+    const current = captureCurrentState();
+    redoStack.push(current);
+    const prev = undoStack.pop();
+    applyHistoryState(prev);
+    showToast(`↩ Vráceno zpět: ${prev.description || 'Akce'}`);
+  }
+
+  function redo() {
+    if (redoStack.length === 0) {
+      showToast('ℹ️ Žádné další akce k opakování');
+      return;
+    }
+    const current = captureCurrentState();
+    undoStack.push(current);
+    const next = redoStack.pop();
+    applyHistoryState(next);
+    showToast(`↪ Znovu provedeno: ${next.description || 'Akce'}`);
+  }
+
+  // Keyboard Shortcuts (Ctrl+Z / Ctrl+Y)
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+    } else if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && e.shiftKey)) {
+      e.preventDefault();
+      redo();
+    }
+  });
+
+  const btnUndo = document.getElementById('btnUndo');
+  const btnRedo = document.getElementById('btnRedo');
+  if (btnUndo) btnUndo.addEventListener('click', undo);
+  if (btnRedo) btnRedo.addEventListener('click', redo);
 
   // Bezier Speed Ramp Keyframes (Progress: 0.0 to 1.0, Speed: 0.25x to 6.0x)
   let speedKeyframes = [
@@ -632,13 +778,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ==================== 2. TWO MAP STYLES ====================
   function setMapStyle(style) {
+    if (renderer.mapStyle === style) return;
+    saveStateForUndo('Změna stylu mapy');
     renderer.mapStyle = style;
     btnStylePanorama.classList.toggle('active', style === 'panorama');
     btnStyleVector.classList.toggle('active', style === 'vector');
+    if (btnSelectStyleA) btnSelectStyleA.classList.toggle('btn-primary', style === 'panorama');
+    if (btnSelectStyleB) btnSelectStyleB.classList.toggle('btn-primary', style === 'vector');
 
     if (style === 'vector' && !renderer.vectorLayers) {
       loadVectorLayers();
     }
+    
+    if (state.currentProjectId) {
+      fetch(`/api/projects/${state.currentProjectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ map_style: style })
+      }).catch(console.warn);
+    }
+    
+    if (!state.isPlaying) {
+      renderer.render();
+    }
+    showToast(style === 'vector' ? '🧭 Přepnuto: Vektorová mapa' : '🗺️ Přepnuto: Mapy.com Panorama');
   }
 
   async function loadVectorLayers() {
@@ -648,7 +811,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await resp.json();
       if (data.layers) {
         renderer.setVectorLayers(data.layers);
-        showToast('✓ Vektorové vrstvy GTA radaru načteny');
+        if (!state.isPlaying) renderer.render();
+        showToast('✓ Vektorové vrstvy mapy načteny');
       }
     } catch (err) {
       console.warn('Vector map loading failed:', err);
@@ -1001,6 +1165,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       state.currentTime = renderer.trimIn * state.durationSec;
       updateTimeDisplay();
+      if (!state.isPlaying) renderer.render();
       showToast(`Načtena trasa: ${filename}`);
     } catch (err) {
       console.error('Error fetching GPX data:', err);
@@ -1012,14 +1177,14 @@ document.addEventListener('DOMContentLoaded', () => {
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       renderer.setMapImage(img, metadata);
-      renderer.setBackdropImage(img, renderer.backdropOpacity || 0.65);
+      if (!state.isPlaying) renderer.render();
     };
     img.onerror = () => {
       const img2 = new Image();
       img2.crossOrigin = 'anonymous';
       img2.onload = () => {
         renderer.setMapImage(img2, metadata);
-        renderer.setBackdropImage(img2, renderer.backdropOpacity || 0.65);
+        if (!state.isPlaying) renderer.render();
       };
       img2.src = `/assets/${encodeURIComponent(filename)}`;
     };
@@ -1050,24 +1215,46 @@ document.addEventListener('DOMContentLoaded', () => {
       const speedMultiplier = getSpeedAtProgress(curProg) * state.playbackSpeed;
 
       state.currentTime += deltaTime * speedMultiplier;
-      const maxTime = renderer.trimOut * state.durationSec;
-      const minTime = renderer.trimIn * state.durationSec;
 
-      if (state.currentTime >= maxTime) {
-        if (state.isLooping) {
-          state.currentTime = minTime;
-        } else {
-          state.currentTime = maxTime;
-          state.isPlaying = false;
-          btnPlayPause.textContent = '▶';
+      if (state.trimMode === 'fit') {
+        // Mode B: Full Duration Fit. Animation plays from 0 to durationSec
+        if (state.currentTime >= state.durationSec) {
+          if (state.isLooping) {
+            state.currentTime = 0;
+          } else {
+            state.currentTime = state.durationSec;
+            state.isPlaying = false;
+            btnPlayPause.textContent = '▶';
+          }
+        }
+      } else {
+        // Mode A: Slice. Animation plays between trimIn and trimOut
+        const minTime = renderer.trimIn * state.durationSec;
+        const maxTime = renderer.trimOut * state.durationSec;
+        if (state.currentTime < minTime) state.currentTime = minTime;
+        if (state.currentTime >= maxTime) {
+          if (state.isLooping) {
+            state.currentTime = minTime;
+          } else {
+            state.currentTime = maxTime;
+            state.isPlaying = false;
+            btnPlayPause.textContent = '▶';
+          }
         }
       }
+
       updateTimeDisplay();
       drawSpeedCurve();
       drawZoomCurve();
     }
 
-    renderer.progress = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+    if (state.trimMode === 'fit') {
+      const norm = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+      renderer.progress = renderer.trimIn + norm * (renderer.trimOut - renderer.trimIn);
+    } else {
+      renderer.progress = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
+    }
+
     renderer.render(deltaTime);
 
     requestAnimationFrame(animationLoop);
@@ -1186,6 +1373,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
+    if (!state.isPlaying) {
+      renderer.render();
+    }
     showToast(`Režim animace: ${e.target.options[e.target.selectedIndex].text}`);
   });
 
@@ -1333,6 +1523,7 @@ document.addEventListener('DOMContentLoaded', () => {
           finishCityInput.value = renderer.finishCityName;
           state.currentTime = renderer.trimIn * state.durationSec;
           updateTimeDisplay();
+          if (!state.isPlaying) renderer.render();
 
           // Persist active_gpx in active SQLite project
           if (state.currentProjectId) {
@@ -1606,9 +1797,42 @@ document.addEventListener('DOMContentLoaded', () => {
   clockStartTime.addEventListener('input', (e) => renderer.clockConfig.startTime = e.target.value);
   clockFinishTime.addEventListener('input', (e) => renderer.clockConfig.finishTime = e.target.value);
 
-  // Kilometer-based Trim synchronization
+  // Kilometer-based Trim synchronization & Mode
   const trimInKmInput = document.getElementById('trimInKmInput');
   const trimOutKmInput = document.getElementById('trimOutKmInput');
+  const btnTrimModeSlice = document.getElementById('btnTrimModeSlice');
+  const btnTrimModeFit = document.getElementById('btnTrimModeFit');
+  const customDurationInput = document.getElementById('customDurationInput');
+
+  if (btnTrimModeSlice && btnTrimModeFit) {
+    btnTrimModeSlice.addEventListener('click', () => {
+      state.trimMode = 'slice';
+      btnTrimModeSlice.classList.add('active');
+      btnTrimModeFit.classList.remove('active');
+      saveCurrentProjectSettings();
+      showToast('Režim ořezu: Časový výřez z celkové trasy');
+    });
+    btnTrimModeFit.addEventListener('click', () => {
+      state.trimMode = 'fit';
+      btnTrimModeFit.classList.add('active');
+      btnTrimModeSlice.classList.remove('active');
+      saveCurrentProjectSettings();
+      showToast('Režim ořezu: Úsek roztažen na plnou délku animace');
+    });
+  }
+
+  if (customDurationInput) {
+    customDurationInput.addEventListener('change', (e) => {
+      const val = parseFloat(e.target.value);
+      if (val && val > 0 && val <= 600) {
+        state.durationSec = val;
+        durationBtns.forEach(b => b.classList.remove('active'));
+        updateTimeDisplay();
+        saveCurrentProjectSettings();
+        showToast(`Délka animace: ${val} s`);
+      }
+    });
+  }
 
   function updateTrim(source) {
     const totalDist = (renderer.gpxData && renderer.gpxData.total_distance_km) ? renderer.gpxData.total_distance_km : 100.0;
@@ -1690,22 +1914,44 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // LOD Layers Configuration
+  const lodDensitySlider = document.getElementById('lodDensitySlider');
+  const lodDensityVal = document.getElementById('lodDensityVal');
   const lodToggleLakes = document.getElementById('lodToggleLakes');
   const lodLakesOpacitySlider = document.getElementById('lodLakesOpacitySlider');
   const lodLakesOpacityVal = document.getElementById('lodLakesOpacityVal');
   const lodToggleRivers = document.getElementById('lodToggleRivers');
+  const lodRiverFilterRankSelect = document.getElementById('lodRiverFilterRankSelect');
   const lodRiversWidthSlider = document.getElementById('lodRiversWidthSlider');
   const lodRiversWidthVal = document.getElementById('lodRiversWidthVal');
+  const lodRiverOpacitySlider = document.getElementById('lodRiverOpacitySlider');
+  const lodRiverOpacityVal = document.getElementById('lodRiverOpacityVal');
   const lodToggleMotorways = document.getElementById('lodToggleMotorways');
   const lodTogglePrimaryRoads = document.getElementById('lodTogglePrimaryRoads');
   const lodToggleLocalRoads = document.getElementById('lodToggleLocalRoads');
   const lodTogglePaths = document.getElementById('lodTogglePaths');
-  const lodToggleSettlements = document.getElementById('lodToggleSettlements');
+  const lodToggleCities = document.getElementById('lodToggleCities');
+  const lodColorCities = document.getElementById('lodColorCities');
+  const lodToggleTowns = document.getElementById('lodToggleTowns');
+  const lodColorTowns = document.getElementById('lodColorTowns');
+  const lodToggleVillages = document.getElementById('lodToggleVillages');
+  const lodColorVillages = document.getElementById('lodColorVillages');
+  const lodToggleLandmarks = document.getElementById('lodToggleLandmarks');
+  const lodColorLandmarks = document.getElementById('lodColorLandmarks');
 
+  if (lodDensitySlider) {
+    lodDensitySlider.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value);
+      renderer.lod.density = val;
+      if (lodDensityVal) lodDensityVal.textContent = `${val} / 5`;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
   if (lodToggleLakes) {
     lodToggleLakes.addEventListener('change', (e) => {
       renderer.lod.lakes_dams = e.target.checked;
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
   if (lodLakesOpacitySlider) {
@@ -1713,49 +1959,122 @@ document.addEventListener('DOMContentLoaded', () => {
       renderer.lod.lakesOpacity = parseInt(e.target.value) / 100.0;
       if (lodLakesOpacityVal) lodLakesOpacityVal.textContent = `${e.target.value}%`;
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
   if (lodToggleRivers) {
     lodToggleRivers.addEventListener('change', (e) => {
       renderer.lod.rivers = e.target.checked;
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (lodRiverFilterRankSelect) {
+    lodRiverFilterRankSelect.addEventListener('change', (e) => {
+      renderer.lod.riverFilterRank = parseInt(e.target.value);
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
   if (lodRiversWidthSlider) {
     lodRiversWidthSlider.addEventListener('input', (e) => {
+      renderer.lod.riverWidth = parseFloat(e.target.value);
       renderer.lod.riversWidth = parseFloat(e.target.value);
       if (lodRiversWidthVal) lodRiversWidthVal.textContent = `${parseFloat(e.target.value).toFixed(1)}px`;
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (lodRiverOpacitySlider) {
+    lodRiverOpacitySlider.addEventListener('input', (e) => {
+      renderer.lod.riverOpacity = parseInt(e.target.value) / 100.0;
+      if (lodRiverOpacityVal) lodRiverOpacityVal.textContent = `${e.target.value}%`;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
   if (lodToggleMotorways) {
     lodToggleMotorways.addEventListener('change', (e) => {
       renderer.lod.motorways = e.target.checked;
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
   if (lodTogglePrimaryRoads) {
     lodTogglePrimaryRoads.addEventListener('change', (e) => {
       renderer.lod.primary_roads = e.target.checked;
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
   if (lodToggleLocalRoads) {
     lodToggleLocalRoads.addEventListener('change', (e) => {
       renderer.lod.local_roads = e.target.checked;
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
   if (lodTogglePaths) {
     lodTogglePaths.addEventListener('change', (e) => {
       renderer.lod.paths = e.target.checked;
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
-  if (lodToggleSettlements) {
-    lodToggleSettlements.addEventListener('change', (e) => {
-      renderer.lod.settlements = e.target.checked;
+  if (lodToggleCities) {
+    lodToggleCities.addEventListener('change', (e) => {
+      renderer.lod.citiesVisible = e.target.checked;
       saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (lodColorCities) {
+    lodColorCities.addEventListener('input', (e) => {
+      renderer.lod.colorCities = e.target.value;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (lodToggleTowns) {
+    lodToggleTowns.addEventListener('change', (e) => {
+      renderer.lod.townsVisible = e.target.checked;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (lodColorTowns) {
+    lodColorTowns.addEventListener('input', (e) => {
+      renderer.lod.colorTowns = e.target.value;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (lodToggleVillages) {
+    lodToggleVillages.addEventListener('change', (e) => {
+      renderer.lod.villagesVisible = e.target.checked;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (lodColorVillages) {
+    lodColorVillages.addEventListener('input', (e) => {
+      renderer.lod.colorVillages = e.target.value;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (lodToggleLandmarks) {
+    lodToggleLandmarks.addEventListener('change', (e) => {
+      renderer.lod.landmarksVisible = e.target.checked;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
+  if (lodColorLandmarks) {
+    lodColorLandmarks.addEventListener('input', (e) => {
+      renderer.lod.colorLandmarks = e.target.value;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
     });
   }
 
@@ -1899,37 +2218,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Spotlight Settings
   const spotlightNameInput = document.getElementById('spotlightNameInput');
+  const btnSpotlightZoomIn = document.getElementById('btnSpotlightZoomIn');
+  const btnSpotlightZoomOut = document.getElementById('btnSpotlightZoomOut');
   const spotlightLatInput = document.getElementById('spotlightLatInput');
   const spotlightLonInput = document.getElementById('spotlightLonInput');
+  const spotlightStartZoomSlider = document.getElementById('spotlightStartZoomSlider');
+  const spotlightStartZoomVal = document.getElementById('spotlightStartZoomVal');
   const spotlightZoomSlider = document.getElementById('spotlightZoomSlider');
   const spotlightZoomVal = document.getElementById('spotlightZoomVal');
+  const spotlightEasingSelect = document.getElementById('spotlightEasingSelect');
   const toggleSpotlightRebound = document.getElementById('toggleSpotlightRebound');
   const toggleSpotlightRoute = document.getElementById('toggleSpotlightRoute');
 
   if (spotlightNameInput) spotlightNameInput.addEventListener('input', (e) => {
     renderer.spotlight.targetName = e.target.value;
     saveCurrentProjectSettings();
+    if (!state.isPlaying) renderer.render();
   });
+  if (btnSpotlightZoomIn && btnSpotlightZoomOut) {
+    btnSpotlightZoomIn.addEventListener('click', () => {
+      renderer.spotlight.direction = 'in';
+      btnSpotlightZoomIn.classList.add('active');
+      btnSpotlightZoomOut.classList.remove('active');
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+      showToast('Směr Spotlight: Přiblížit (Zoom In)');
+    });
+    btnSpotlightZoomOut.addEventListener('click', () => {
+      renderer.spotlight.direction = 'out';
+      btnSpotlightZoomOut.classList.add('active');
+      btnSpotlightZoomIn.classList.remove('active');
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+      showToast('Směr Spotlight: Oddálit (Zoom Out)');
+    });
+  }
   if (spotlightLatInput) spotlightLatInput.addEventListener('input', (e) => {
     renderer.spotlight.targetLat = parseFloat(e.target.value) || 50.068281;
     saveCurrentProjectSettings();
+    if (!state.isPlaying) renderer.render();
   });
   if (spotlightLonInput) spotlightLonInput.addEventListener('input', (e) => {
     renderer.spotlight.targetLon = parseFloat(e.target.value) || 14.424340;
     saveCurrentProjectSettings();
+    if (!state.isPlaying) renderer.render();
   });
+  if (spotlightStartZoomSlider) {
+    spotlightStartZoomSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      renderer.spotlight.startZoom = val;
+      if (spotlightStartZoomVal) spotlightStartZoomVal.textContent = `${val.toFixed(1)}x`;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
   if (spotlightZoomSlider) spotlightZoomSlider.addEventListener('input', (e) => {
     renderer.spotlight.zoomLevel = parseFloat(e.target.value);
     if (spotlightZoomVal) spotlightZoomVal.textContent = `${parseFloat(e.target.value).toFixed(1)}x`;
     saveCurrentProjectSettings();
+    if (!state.isPlaying) renderer.render();
   });
+  if (spotlightEasingSelect) {
+    spotlightEasingSelect.addEventListener('change', (e) => {
+      renderer.spotlight.easing = e.target.value;
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+    });
+  }
   if (toggleSpotlightRebound) toggleSpotlightRebound.addEventListener('change', (e) => {
     renderer.spotlight.endingRebound = e.target.checked;
     saveCurrentProjectSettings();
+    if (!state.isPlaying) renderer.render();
   });
   if (toggleSpotlightRoute) toggleSpotlightRoute.addEventListener('change', (e) => {
     renderer.spotlight.showRoute = e.target.checked;
     saveCurrentProjectSettings();
+    if (!state.isPlaying) renderer.render();
   });
 
   // ==================== 10. PANORAMA GENERATOR MODAL ====================
@@ -2082,33 +2446,68 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function addWaypointAtCurrent() {
-    const curProgress = state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0;
-    const distKm = curProgress * (renderer.gpxData ? renderer.gpxData.total_distance_km : 100);
-    const title = prompt("Zadejte název bodu (např. 'Vyhlídka na Vltavu', 'Občerstvení'):", "Bod zájmu");
-    if (!title) return;
+  const addWaypointModal = document.getElementById('addWaypointModal');
+  const newWpTitleInput = document.getElementById('newWpTitleInput');
+  const newWpSubtitleInput = document.getElementById('newWpSubtitleInput');
+  const newWpCategorySelect = document.getElementById('newWpCategorySelect');
+  const newWpKmInput = document.getElementById('newWpKmInput');
+  const btnCloseAddWaypointModal = document.getElementById('btnCloseAddWaypointModal');
+  const btnCancelAddWaypoint = document.getElementById('btnCancelAddWaypoint');
+  const btnConfirmAddWaypoint = document.getElementById('btnConfirmAddWaypoint');
 
-    const subtitle = prompt("Zadejte podtitulek (např. 'km 42.5 • Odpočinek'):", `${distKm.toFixed(1)} km`);
-    if (!subtitle) return;
-
-    renderer.waypoints.push({
-      id: 'wp_' + Date.now(),
-      title,
-      subtitle,
-      dist_km: Number(distKm.toFixed(1)),
-      progress: curProgress,
-      duration_progress: 0.05,
-      category: 'flag'
-    });
-
-    renderer.waypoints.sort((a, b) => a.progress - b.progress);
-    updateWaypointsUI();
-    renderTimelineWaypoints();
-    showToast(`Bod přidán: ${title}`);
+  function openAddWaypointModal() {
+    const totalKm = (renderer.gpxData ? renderer.gpxData.total_distance_km : 100) || 100;
+    const curProgress = renderer.progress || (state.durationSec > 0 ? (state.currentTime / state.durationSec) : 0);
+    const distKm = curProgress * totalKm;
+    if (newWpKmInput) newWpKmInput.value = distKm.toFixed(1);
+    if (newWpTitleInput) {
+      newWpTitleInput.value = `Milník km ${distKm.toFixed(1)}`;
+    }
+    if (newWpSubtitleInput) newWpSubtitleInput.value = `Bod zájmu • ${distKm.toFixed(1)} km`;
+    if (addWaypointModal) addWaypointModal.style.display = 'flex';
   }
 
-  btnAddWpAtCurrent.addEventListener('click', addWaypointAtCurrent);
-  btnQuickAddWp.addEventListener('click', addWaypointAtCurrent);
+  function closeAddWaypointModal() {
+    if (addWaypointModal) addWaypointModal.style.display = 'none';
+  }
+
+  if (btnCloseAddWaypointModal) btnCloseAddWaypointModal.addEventListener('click', closeAddWaypointModal);
+  if (btnCancelAddWaypoint) btnCancelAddWaypoint.addEventListener('click', closeAddWaypointModal);
+
+  if (btnConfirmAddWaypoint) {
+    btnConfirmAddWaypoint.addEventListener('click', () => {
+      const title = newWpTitleInput.value.trim() || 'Bod zájmu';
+      const subtitle = newWpSubtitleInput.value.trim() || '';
+      const category = newWpCategorySelect ? newWpCategorySelect.value : 'flag';
+      const distKm = parseFloat(newWpKmInput.value) || 0;
+      const totalKm = (renderer.gpxData ? renderer.gpxData.total_distance_km : 100) || 1;
+      const prog = Math.max(0, Math.min(1, distKm / totalKm));
+
+      saveStateForUndo('Přidání bodu zájmu');
+
+      renderer.waypoints.push({
+        id: 'wp_' + Date.now(),
+        title,
+        subtitle,
+        desc: subtitle,
+        dist_km: Number(distKm.toFixed(1)),
+        progress: prog,
+        duration_progress: 0.05,
+        category: category
+      });
+
+      renderer.waypoints.sort((a, b) => (a.dist_km || 0) - (b.dist_km || 0));
+      updateWaypointsUI();
+      renderTimelineWaypoints();
+      saveCurrentProjectSettings();
+      if (!state.isPlaying) renderer.render();
+      closeAddWaypointModal();
+      showToast(`✓ Bod přidán do mapy: ${title}`);
+    });
+  }
+
+  if (btnAddWpAtCurrent) btnAddWpAtCurrent.addEventListener('click', openAddWaypointModal);
+  if (btnQuickAddWp) btnQuickAddWp.addEventListener('click', openAddWaypointModal);
 
   // ==================== 12. DAVINCI RESOLVE EXPORT PIPELINE ====================
   btnOpenExportModal.addEventListener('click', () => {
@@ -2215,10 +2614,12 @@ document.addEventListener('DOMContentLoaded', () => {
         exportProgressStatus.textContent = `Generuji snímek ${i + 1}/${totalExportFrames}...`;
       }
 
-      exportProgressStatus.textContent = chosenFormat === 'prores4444' 
-        ? 'Kóduji Apple ProRes 4444 (.mov s alfou) přes FFmpeg...' 
-        : 'Dokončuji soubory...';
+      const isBackground = document.getElementById('exportBackgroundToggle')?.checked || false;
+
+      exportProgressStatus.textContent = `Kóduji ${chosenFormat.toUpperCase()} přes FFmpeg...`;
       exportProgressBarFill.style.width = '88%';
+
+      const snapshotData = captureCurrentState('Exportované video: ' + chosenFormat);
 
       const finalizeResp = await fetch('/api/export/finalize', {
         method: 'POST',
@@ -2229,33 +2630,47 @@ document.addEventListener('DOMContentLoaded', () => {
           duration: state.durationSec,
           resolution: chosenRes,
           export_format: chosenFormat,
-          motion_blur: withMotionBlur
+          motion_blur: withMotionBlur,
+          background: isBackground,
+          snapshot_data: snapshotData
         })
       });
 
       const result = await finalizeResp.json();
+
+      if (isBackground) {
+        exportModal.style.display = 'none';
+        showToast(`🚀 Export ${chosenFormat.toUpperCase()} běží na pozadí`);
+        startBackgroundExportPolling(job_id, chosenFormat, result.snapshot_url);
+        return;
+      }
+
       if (result.status === 'success') {
         exportProgressBarFill.style.width = '100%';
         exportProgressPct.textContent = '100%';
         exportProgressStatus.textContent = 'Render dokončen!';
         exportResultBox.style.display = 'block';
 
-        if (result.format === 'prores4444' || result.format === 'webm') {
-          exportResultDetails.innerHTML = `
-            <strong>Soubor:</strong> ${result.filename}<br>
-            <strong>Velikost:</strong> ${result.size_mb} MB (${result.frames_count} snímků @ ${chosenFps} fps)<br>
-            <strong>Cesta k souboru:</strong> <code style="color:var(--accent-cyan);">${result.file_path}</code>
-          `;
-          btnDownloadExport.href = result.download_url;
-          btnDownloadExport.download = result.filename;
-          btnDownloadExport.style.display = 'inline-flex';
+        exportResultDetails.innerHTML = `
+          <strong>Soubor:</strong> ${result.filename}<br>
+          <strong>Velikost:</strong> ${result.size_mb} MB (${totalExportFrames} snímků @ ${chosenFps} fps)<br>
+          <strong>Cesta k souboru:</strong> <code style="color:var(--accent-cyan);">${result.file_path || result.download_url}</code>
+        `;
+        btnDownloadExport.href = result.download_url;
+        btnDownloadExport.download = result.filename;
+        btnDownloadExport.style.display = 'inline-flex';
 
-          btnCopyExportPath.onclick = () => {
-            navigator.clipboard.writeText(result.file_path);
-            btnCopyExportPath.textContent = '✓ Zkopírováno!';
-            setTimeout(() => btnCopyExportPath.textContent = '📋 Zkopírovat cestu k souboru', 2000);
-          };
+        if (btnDownloadExportSnapshot && result.snapshot_url) {
+          btnDownloadExportSnapshot.href = result.snapshot_url;
+          btnDownloadExportSnapshot.download = `project_snapshot_${job_id}.json`;
+          btnDownloadExportSnapshot.style.display = 'inline-flex';
         }
+
+        btnCopyExportPath.onclick = () => {
+          navigator.clipboard.writeText(result.file_path || result.download_url);
+          btnCopyExportPath.textContent = '✓ Zkopírováno!';
+          setTimeout(() => btnCopyExportPath.textContent = '📋 Zkopírovat cestu k souboru', 2000);
+        };
       }
     } catch (err) {
       alert('Chyba exportu: ' + err.message);
@@ -2263,6 +2678,52 @@ document.addEventListener('DOMContentLoaded', () => {
       btnStartExport.disabled = false;
     }
   });
+
+  const bgExportIndicator = document.getElementById('bgExportIndicator');
+  const btnDownloadExportSnapshot = document.getElementById('btnDownloadExportSnapshot');
+
+  function startBackgroundExportPolling(jobId, format, snapshotUrl) {
+    if (!bgExportIndicator) return;
+    bgExportIndicator.style.display = 'inline-flex';
+    bgExportIndicator.textContent = `⏳ Exportuji ${format.toUpperCase()}...`;
+    bgExportIndicator.onclick = () => {
+      exportModal.style.display = 'flex';
+    };
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const resp = await fetch(`/api/export/status/${jobId}`);
+        const data = await resp.json();
+        if (data.status === 'complete') {
+          clearInterval(pollInterval);
+          bgExportIndicator.textContent = `✓ Export hotov (${data.size_mb} MB)`;
+          bgExportIndicator.style.background = 'rgba(16, 185, 129, 0.35)';
+          bgExportIndicator.onclick = () => {
+            window.location.href = data.download_url;
+          };
+          showToast(`✓ Video úspěšně exportováno (${data.size_mb} MB)!`);
+
+          if (btnDownloadExport) {
+            btnDownloadExport.href = data.download_url;
+            btnDownloadExport.download = data.filename;
+            btnDownloadExport.style.display = 'inline-flex';
+          }
+          if (btnDownloadExportSnapshot && (snapshotUrl || data.snapshot_url)) {
+            btnDownloadExportSnapshot.href = snapshotUrl || data.snapshot_url;
+            btnDownloadExportSnapshot.download = `project_snapshot_${jobId}.json`;
+            btnDownloadExportSnapshot.style.display = 'inline-flex';
+          }
+        } else if (data.status === 'error') {
+          clearInterval(pollInterval);
+          bgExportIndicator.textContent = '❌ Chyba exportu';
+          bgExportIndicator.style.background = 'rgba(239, 68, 68, 0.35)';
+          showToast('Chyba při exportu: ' + (data.error || 'Neznámá chyba'), true);
+        }
+      } catch (e) {
+        console.warn('Polling error:', e);
+      }
+    }, 1200);
+  }
 
   // ==================== 13. FUSION MACRO EXPORT ====================
   btnOpenFusionModal.addEventListener('click', async () => {
@@ -2550,13 +3011,32 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div class="snapshot-card-actions">
           <button class="btn btn-secondary btn-restore-snapshot" style="padding:2px 8px; font-size:10px;" title="Aktivovat snímek">Nahrát</button>
+          <button class="btn btn-secondary btn-rename-snapshot" style="padding:2px 6px; font-size:10px;" title="Přejmenovat snímek">✏️</button>
           <button class="btn btn-secondary btn-del-snapshot" style="padding:2px 6px; font-size:10px; color:var(--accent-danger);" title="Smazat">&times;</button>
         </div>
       `;
 
       item.querySelector('.btn-restore-snapshot').addEventListener('click', () => {
-        applySnapshotConfig(sn.config);
-        showToast(`Snímek aktivován: ${sn.name}`);
+        saveStateForUndo('Aktivace snímku ' + sn.name);
+        applySnapshotConfig(sn.data || sn.config);
+        showToast(`✓ Snímek aktivován: ${sn.name}`);
+      });
+
+      item.querySelector('.btn-rename-snapshot').addEventListener('click', async () => {
+        const newName = prompt('Zadejte nový název snímku:', sn.name);
+        if (newName && newName.trim() && newName.trim() !== sn.name) {
+          try {
+            await fetch(`/api/projects/${state.currentProjectId}/snapshots/${sn.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: newName.trim() })
+            });
+            loadSnapshots(state.currentProjectId);
+            showToast('✓ Snímek přejmenován');
+          } catch (err) {
+            console.error(err);
+          }
+        }
       });
 
       item.querySelector('.btn-del-snapshot').addEventListener('click', async () => {
@@ -2577,14 +3057,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!cfg) return;
     if (cfg.colors) {
       renderer.colors = { ...renderer.colors, ...cfg.colors };
-      colorPath.value = renderer.colors.path;
-      colorPathVal.textContent = renderer.colors.path.toUpperCase();
-      colorElevation.value = renderer.colors.elevation;
-      colorElevationVal.textContent = renderer.colors.elevation.toUpperCase();
-      colorText.value = renderer.colors.text;
-      colorTextVal.textContent = renderer.colors.text.toUpperCase();
-      colorRiver.value = renderer.colors.river;
-      colorRiverVal.textContent = renderer.colors.river.toUpperCase();
+      if (colorPath) { colorPath.value = renderer.colors.path; colorPathVal.textContent = renderer.colors.path.toUpperCase(); }
+      if (colorElevation) { colorElevation.value = renderer.colors.elevation; colorElevationVal.textContent = renderer.colors.elevation.toUpperCase(); }
+      if (colorText) { colorText.value = renderer.colors.text; colorTextVal.textContent = renderer.colors.text.toUpperCase(); }
+      if (colorRiver) { colorRiver.value = renderer.colors.river; colorRiverVal.textContent = renderer.colors.river.toUpperCase(); }
       const colorUnitsEl = document.getElementById('colorUnits');
       const colorUnitsValEl = document.getElementById('colorUnitsVal');
       if (colorUnitsEl && renderer.colors.units) {
@@ -2594,8 +3070,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (cfg.hudScale) {
       renderer.hudScale = cfg.hudScale;
-      hudScaleSlider.value = cfg.hudScale;
-      hudScaleVal.textContent = `${cfg.hudScale.toFixed(2)}x`;
+      if (hudScaleSlider) hudScaleSlider.value = cfg.hudScale;
+      if (hudScaleVal) hudScaleVal.textContent = `${cfg.hudScale.toFixed(2)}x`;
     }
     if (cfg.layout) {
       renderer.hudLayout = { ...renderer.hudLayout, ...cfg.layout };
@@ -2606,34 +3082,58 @@ document.addEventListener('DOMContentLoaded', () => {
     if (cfg.lod) {
       renderer.lod = { ...renderer.lod, ...cfg.lod };
     }
+    if (cfg.mapStyle) {
+      setMapStyle(cfg.mapStyle);
+    }
     if (cfg.animationMode) {
       renderer.animationMode = cfg.animationMode;
-      animModeSelect.value = cfg.animationMode;
+      if (animModeSelect) animModeSelect.value = cfg.animationMode;
     }
-    if (cfg.viewportZoom) {
-      renderer.viewportZoom = cfg.viewportZoom;
-      if (viewportZoomSlider) viewportZoomSlider.value = cfg.viewportZoom;
+    if (cfg.trimIn !== undefined) {
+      renderer.trimIn = cfg.trimIn;
+      if (trimInSlider) trimInSlider.value = Math.round(cfg.trimIn * 100);
+    }
+    if (cfg.trimOut !== undefined) {
+      renderer.trimOut = cfg.trimOut;
+      if (trimOutSlider) trimOutSlider.value = Math.round(cfg.trimOut * 100);
+    }
+    if (cfg.trimMode) {
+      state.trimMode = cfg.trimMode;
+      const bSlice = document.getElementById('btnTrimModeSlice');
+      const bFit = document.getElementById('btnTrimModeFit');
+      if (bSlice) bSlice.classList.toggle('active', cfg.trimMode === 'slice');
+      if (bFit) bFit.classList.toggle('active', cfg.trimMode === 'fit');
+    }
+    if (cfg.durationSec) {
+      state.durationSec = cfg.durationSec;
+      const cDur = document.getElementById('customDurationInput');
+      if (cDur) cDur.value = cfg.durationSec;
+      updateTimeDisplay();
+    }
+    if (cfg.waypoints) {
+      renderer.waypoints = JSON.parse(JSON.stringify(cfg.waypoints));
+      updateWaypointsUI();
+      renderTimelineWaypoints();
+    }
+    if (cfg.spotlight) {
+      renderer.spotlight = { ...renderer.spotlight, ...cfg.spotlight };
+    }
+    if (cfg.speedKeyframes) {
+      speedKeyframes = JSON.parse(JSON.stringify(cfg.speedKeyframes));
+      drawSpeedCurve();
     }
     if (cfg.zoomKeyframes) {
-      renderer.zoomKeyframes = cfg.zoomKeyframes;
+      renderer.zoomKeyframes = JSON.parse(JSON.stringify(cfg.zoomKeyframes));
       drawZoomCurve();
     }
+    if (!state.isPlaying) renderer.render();
   }
 
   if (btnSaveSnapshot && snapshotNameInput) {
     btnSaveSnapshot.addEventListener('click', async () => {
       const name = snapshotNameInput.value.trim() || `Snímek ${new Date().toLocaleTimeString()}`;
       if (!state.currentProjectId) return;
-      const config = {
-        colors: renderer.colors,
-        hudScale: renderer.hudScale,
-        layout: renderer.hudLayout,
-        toggles: renderer.toggles,
-        lod: renderer.lod,
-        animationMode: renderer.animationMode,
-        viewportZoom: renderer.viewportZoom || 1.0,
-        zoomKeyframes: renderer.zoomKeyframes
-      };
+      const config = captureCurrentState('Snímek: ' + name);
       try {
         await fetch(`/api/projects/${state.currentProjectId}/snapshots`, {
           method: 'POST',
@@ -2646,6 +3146,55 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (err) {
         showToast('Chyba při ukládání snímku: ' + err.message, true);
       }
+    });
+  }
+
+  // ==================== 14B. PORTABLE PROJECT FILE (.json) ====================
+  const btnExportProjectJson = document.getElementById('btnExportProjectJson');
+  const btnImportProjectJson = document.getElementById('btnImportProjectJson');
+  const importProjectFileInput = document.getElementById('importProjectFileInput');
+
+  if (btnExportProjectJson) {
+    btnExportProjectJson.addEventListener('click', () => {
+      const projState = captureCurrentState('Exportovaný projekt');
+      const curProj = state.projects.find(p => p.id === state.currentProjectId);
+      projState.projectName = curProj ? curProj.name : 'Projekt';
+      projState.activeGpx = gpxSelect ? gpxSelect.value : null;
+      projState.version = '3.0';
+      const jsonStr = JSON.stringify(projState, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${projState.projectName.replace(/\s+/g, '_')}_motion_project.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('✓ Projekt exportován do souboru .json');
+    });
+  }
+
+  if (btnImportProjectJson && importProjectFileInput) {
+    btnImportProjectJson.addEventListener('click', () => importProjectFileInput.click());
+    importProjectFileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        saveStateForUndo('Import projektu ze souboru');
+        applyHistoryState(data);
+        if (data.activeGpx && gpxSelect) {
+          gpxSelect.value = data.activeGpx;
+          await selectGPX(data.activeGpx);
+        }
+        saveCurrentProjectSettings();
+        showToast('✓ Projekt úspěšně importován ze souboru');
+      } catch (err) {
+        showToast('Chyba při importu souboru: ' + err.message, true);
+      }
+      importProjectFileInput.value = '';
     });
   }
 

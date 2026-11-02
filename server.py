@@ -48,8 +48,10 @@ class FinalizeExportRequest(BaseModel):
     fps: int = 30
     duration: float = 10.0
     resolution: str = "1920x1080"
-    export_format: str = "prores4444" # prores4444 | png_sequence | webm
+    export_format: str = "mp4" # mp4 | webm | prores4444 | png_sequence
     motion_blur: bool = False
+    background: bool = False
+    snapshot_data: Optional[dict] = None
 
 class FusionExportRequest(BaseModel):
     points: List[dict]
@@ -151,7 +153,7 @@ async def get_assets():
                         "filename": f.name,
                         "path": f"/assets/{f.name}" if sdir == ASSETS_DIR else f"/{f.name}",
                         "size_kb": round(stat.st_size / 1024, 1),
-                        "is_default": "mapy_cz" in f.name.lower() or "map" in f.name.lower()
+                        "is_default": "panorama" in f.name.lower() or "mapy" in f.name.lower()
                     })
 
     # Sort so default is first
@@ -297,7 +299,7 @@ async def delete_project(project_id: str):
 
 @app.get("/api/vector-map/{project_id}")
 async def get_vector_map(project_id: str):
-    """Returns multi-layered vector geometries for GTA Radar Style B."""
+    """Returns multi-layered vector geometries for Style B Vector Map."""
     layers = vector_engine.get_corridor_vector_layers(project_id)
     return {"status": "success", "layers": layers}
 
@@ -403,6 +405,14 @@ async def create_snapshot(project_id: str, req: SnapshotCreateRequest):
     snap_data = req.data if req.data is not None else (req.config or {})
     snap = db.create_snapshot(project_id, req.name, snap_data)
     return {"status": "success", "snapshot": snap}
+
+class SnapshotRenameRequest(BaseModel):
+    name: str
+
+@app.put("/api/projects/{project_id}/snapshots/{snapshot_id}")
+async def rename_snapshot(project_id: str, snapshot_id: str, req: SnapshotRenameRequest):
+    ok = db.update_snapshot(snapshot_id, req.name)
+    return {"status": "success" if ok else "not_found"}
 
 @app.delete("/api/projects/{project_id}/snapshots/{snapshot_id}")
 async def delete_snapshot(project_id: str, snapshot_id: str):
@@ -514,9 +524,53 @@ async def upload_frames(batch: FrameBatch):
 
     return {"status": "ok", "saved_frames": saved_count}
 
+EXPORT_JOBS = {}
+
+async def _encode_worker(cmd, out_path, job_id, export_format, snapshot_url):
+    try:
+        EXPORT_JOBS[job_id] = {"status": "encoding", "progress": 50, "format": export_format}
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            err_msg = stderr.decode()[-500:] if stderr else "Unknown ffmpeg error"
+            EXPORT_JOBS[job_id] = {"status": "error", "error": err_msg}
+            return
+
+        file_size_mb = round(out_path.stat().st_size / (1024 * 1024), 2)
+        EXPORT_JOBS[job_id] = {
+            "status": "complete",
+            "format": export_format,
+            "filename": out_path.name,
+            "size_mb": file_size_mb,
+            "download_url": f"/exports/{job_id}/{out_path.name}",
+            "snapshot_url": snapshot_url
+        }
+    except Exception as e:
+        EXPORT_JOBS[job_id] = {"status": "error", "error": str(e)}
+
+@app.get("/api/export/status/{job_id}")
+async def get_export_status(job_id: str):
+    if job_id not in EXPORT_JOBS:
+        # Check if output file already exists on disk
+        job_dir = EXPORTS_DIR / job_id
+        if job_dir.exists():
+            for f in job_dir.glob("rekola_motion_*.*"):
+                return {
+                    "status": "complete",
+                    "filename": f.name,
+                    "size_mb": round(f.stat().st_size / (1024 * 1024), 2),
+                    "download_url": f"/exports/{job_id}/{f.name}"
+                }
+        return {"status": "not_found"}
+    return EXPORT_JOBS[job_id]
+
 @app.post("/api/export/finalize")
 async def finalize_export(req: FinalizeExportRequest):
-    """Encodes stored PNG frames into Apple ProRes 4444 (.mov with alpha) or WebM using FFmpeg."""
+    """Encodes stored PNG frames into MP4, WebM (VP9 transparent), or Apple ProRes 4444 using FFmpeg."""
     job_dir = EXPORTS_DIR / req.job_id
     frames_dir = job_dir / "frames"
     if not frames_dir.exists():
@@ -526,6 +580,17 @@ async def finalize_export(req: FinalizeExportRequest):
     if not frames:
         raise HTTPException(status_code=400, detail="No frames were uploaded for this export job")
 
+    # Save matching project snapshot recipe file alongside video
+    snapshot_filename = f"project_snapshot_{req.job_id}.json"
+    snapshot_path = job_dir / snapshot_filename
+    snapshot_url = f"/exports/{req.job_id}/{snapshot_filename}"
+    if req.snapshot_data:
+        try:
+            with open(snapshot_path, "w", encoding="utf-8") as f:
+                json.dump(req.snapshot_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving snapshot with export: {e}")
+
     # Output file definition
     vf_filters = []
     if req.motion_blur:
@@ -533,10 +598,40 @@ async def finalize_export(req: FinalizeExportRequest):
 
     vf_args = ["-vf", ",".join(vf_filters)] if vf_filters else []
 
-    if req.export_format == "prores4444":
+    if req.export_format == "mp4":
+        out_filename = f"rekola_motion_{req.job_id}.mp4"
+        out_path = job_dir / out_filename
+        cmd = [
+            "ffmpeg", "-y",
+            "-framerate", str(req.fps),
+            "-i", str(frames_dir / "frame_%05d.png"),
+            *vf_args,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "18",
+            "-pix_fmt", "yuv420p",
+            str(out_path)
+        ]
+    elif req.export_format == "webm":
+        out_filename = f"rekola_motion_alpha_{req.job_id}.webm"
+        out_path = job_dir / out_filename
+        # Multi-threaded fast VP9 transparent WebM
+        cmd = [
+            "ffmpeg", "-y",
+            "-framerate", str(req.fps),
+            "-i", str(frames_dir / "frame_%05d.png"),
+            *vf_args,
+            "-c:v", "libvpx-vp9",
+            "-pix_fmt", "yuva420p",
+            "-b:v", "3M",
+            "-speed", "4",
+            "-row-mt", "1",
+            "-threads", "4",
+            str(out_path)
+        ]
+    elif req.export_format == "prores4444":
         out_filename = f"rekola_motion_prores4444_{req.job_id}.mov"
         out_path = job_dir / out_filename
-        # ffmpeg command for transparent Apple ProRes 4444
         cmd = [
             "ffmpeg", "-y",
             "-framerate", str(req.fps),
@@ -547,20 +642,6 @@ async def finalize_export(req: FinalizeExportRequest):
             "-pix_fmt", "yuva444p10le",
             str(out_path)
         ]
-    elif req.export_format == "webm":
-        out_filename = f"rekola_motion_alpha_{req.job_id}.webm"
-        out_path = job_dir / out_filename
-        # ffmpeg command for transparent VP9 WebM
-        cmd = [
-            "ffmpeg", "-y",
-            "-framerate", str(req.fps),
-            "-i", str(frames_dir / "frame_%05d.png"),
-            *vf_args,
-            "-c:v", "libvpx-vp9",
-            "-pix_fmt", "yuva420p",
-            "-b:v", "4M",
-            str(out_path)
-        ]
     else: # png_sequence
         out_filename = "frames"
         out_path = frames_dir
@@ -569,10 +650,20 @@ async def finalize_export(req: FinalizeExportRequest):
             "format": "png_sequence",
             "frames_count": len(frames),
             "directory_path": str(frames_dir),
-            "download_url": f"/exports/{req.job_id}/frames/"
+            "download_url": f"/exports/{req.job_id}/frames/",
+            "snapshot_url": snapshot_url
         }
 
-    # Execute ffmpeg
+    if req.background:
+        asyncio.create_task(_encode_worker(cmd, out_path, req.job_id, req.export_format, snapshot_url))
+        return {
+            "status": "processing",
+            "job_id": req.job_id,
+            "format": req.export_format,
+            "snapshot_url": snapshot_url
+        }
+
+    # Synchronous execution
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -592,6 +683,7 @@ async def finalize_export(req: FinalizeExportRequest):
         "size_mb": file_size_mb,
         "file_path": str(out_path),
         "download_url": f"/exports/{req.job_id}/{out_filename}",
+        "snapshot_url": snapshot_url,
         "frames_path": str(frames_dir),
         "frames_count": len(frames)
     }

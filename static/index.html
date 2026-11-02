@@ -30,8 +30,8 @@
         <button class="style-toggle-btn active" id="btnStylePanorama" title="Vysoké rozlišení Mapy.com Panorama (Styl A)">
           🗺️ Mapy.com
         </button>
-        <button class="style-toggle-btn" id="btnStyleVector" title="Průhledná minimalistická vektorová mapa (Styl B GTA Radar)">
-          🧭 GTA Vektor
+        <button class="style-toggle-btn" id="btnStyleVector" title="Průhledná minimalistická vektorová mapa (Styl B Vektor)">
+          🧭 Vektorová mapa
         </button>
       </div>
 
@@ -43,6 +43,12 @@
         🔍 Zoom Ramp
       </button>
 
+      <!-- History Undo / Redo -->
+      <div style="display:flex; gap:2px;">
+        <button class="tool-btn" id="btnUndo" title="Zpět (Ctrl+Z)" style="padding:4px 8px; font-size:11px;">↩</button>
+        <button class="tool-btn" id="btnRedo" title="Znovu (Ctrl+Y)" style="padding:4px 8px; font-size:11px;">↪</button>
+      </div>
+
       <button class="btn btn-secondary" id="btnUploadTrigger" title="Nahrát GPX nebo obrázek mapy">
         + Importovat GPX
       </button>
@@ -50,6 +56,9 @@
     </div>
 
     <div class="header-actions">
+      <div id="bgExportIndicator" class="tool-btn" style="display:none; background:rgba(16, 185, 129, 0.15); border-color:#10b981; color:#10b981; font-weight:700; font-size:11px; cursor:pointer;" title="Kliknutím zobrazíte stažení">
+        ⏳ Export videa...
+      </div>
       <button class="btn btn-fusion" id="btnOpenFusionModal">
         ✨ Fusion (.setting)
       </button>
@@ -181,6 +190,10 @@
               <div class="duration-pill active" data-dur="10">10s</div>
               <div class="duration-pill" data-dur="15">15s</div>
               <div class="duration-pill" data-dur="30">30s</div>
+              <div style="display:flex; align-items:center; gap:3px; margin-left:4px;">
+                <input type="number" id="customDurationInput" class="tool-btn" style="width:48px; height:24px; padding:1px 4px; text-align:center; font-size:11px;" min="1" max="600" step="1" value="10" title="Vlastní délka animace v sekundách">
+                <span style="font-size:10px; color:var(--text-dim);">s</span>
+              </div>
             </div>
             <button class="btn btn-secondary" id="btnQuickAddWp" style="padding:4px 8px; font-size:11px;">
               + Přidat bod
@@ -251,6 +264,17 @@
               <button class="btn btn-emerald" id="btnSaveSnapshot" style="padding:3px 10px; font-size:11px;">📸 Uložit</button>
             </div>
             <div id="snapshotsListContainer" style="max-height:130px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+          </div>
+
+          <div class="section-title">Přenosný Projektový Soubor (.json)</div>
+          <div style="display:flex; gap:6px; margin-bottom:12px;">
+            <button class="btn btn-secondary" id="btnExportProjectJson" style="flex:1; justify-content:center; padding:5px 8px; font-size:11px;" title="Stáhne kompletní nastavení projektu do přenosného souboru .json">
+              📥 Exportovat .json
+            </button>
+            <button class="btn btn-secondary" id="btnImportProjectJson" style="flex:1; justify-content:center; padding:5px 8px; font-size:11px;" title="Nahraje a obnoví 100% nastavení ze souboru .json">
+              📤 Importovat .json
+            </button>
+            <input type="file" id="importProjectFileInput" accept=".json" style="display:none;">
           </div>
         </div>
 
@@ -433,6 +457,11 @@
 
           <div class="section-title">Ořez Úseku Trasy (Trim)</div>
           <div class="form-group">
+            <div class="form-label"><span>Režim přehrávání ořezu</span></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">
+              <button class="btn btn-secondary active" id="btnTrimModeSlice" title="Přehrát jako časový výsek původní celkové délky" style="justify-content:center; font-size:10.5px; padding:4px 6px;">⏱️ Časový výřez</button>
+              <button class="btn btn-secondary" id="btnTrimModeFit" title="Roztáhnout vybraný úsek na celou délku animace" style="justify-content:center; font-size:10.5px; padding:4px 6px;">📐 Plná délka úseku</button>
+            </div>
             <div class="form-label"><span>Rozsah animace</span><span class="form-val" id="trimVal">0% — 100%</span></div>
             <div style="display:flex; gap:8px;">
               <input type="range" class="form-range" id="trimInSlider" min="0" max="95" value="0" title="Trim Od (Dvojklik pro reset)">
@@ -478,7 +507,7 @@
           <div class="section-title">Volba Stylu Mapy</div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
             <button class="btn btn-secondary" id="btnSelectStyleA" style="justify-content:center;">🗺️ Mapy.com Panorama</button>
-            <button class="btn btn-secondary" id="btnSelectStyleB" style="justify-content:center;">🧭 GTA Vektor Radar</button>
+            <button class="btn btn-secondary" id="btnSelectStyleB" style="justify-content:center;">🧭 Vektorový Styl</button>
           </div>
 
           <div class="section-title">Podklad z Mapy.com & Panorama</div>
@@ -511,50 +540,97 @@
           <div class="section-title">Úroveň Detailů (LOD) & Vrstvy Mapy</div>
           <div style="background:var(--bg-input); padding:10px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:14px;">
             <div style="font-size:10.5px; color:var(--text-muted); margin-bottom:8px;">
-              Zapněte nebo vypněte konkrétní prvky pro čistý televizní styl bez rušivých prvků.
+              Nastavte hustotu prvků pro čistý televizní styl. Funguje pro celou trasu, přelet i minimapu.
             </div>
 
+            <!-- Master LOD Density Slider -->
+            <div class="form-group" style="background:var(--bg-panel); padding:8px; border-radius:4px; margin-bottom:10px;">
+              <div class="form-label" style="font-weight:700;"><span>Hustota detailů & POI bodů</span><span class="form-val" id="lodDensityVal">3 / 5</span></div>
+              <input type="range" class="form-range" id="lodDensitySlider" min="1" max="5" step="1" value="3" title="1: Jen kraje, 3: Města i obce, 5: Všechny vesnice a památky">
+              <div style="font-size:9.5px; color:var(--text-dim); margin-top:3px;">
+                Umožňuje zobrazit detailní body a vesnice i při velkém oddálení mapy.
+              </div>
+            </div>
+
+            <!-- Lakes & Dams -->
             <div class="toggle-item" style="padding:4px 0;">
-              <span>Přehrady a velká jezera (Lipno, Orlík, Slapy...)</span>
+              <span>Přehrady a velká jezera (Lipno, Orlík...)</span>
               <label class="toggle-switch"><input type="checkbox" id="lodToggleLakes" checked><span class="toggle-slider"></span></label>
             </div>
-            <div class="form-group" style="margin:4px 0 8px 0;">
-              <div class="form-label" style="font-size:10px;"><span>Krytí vodních ploch</span><span class="form-val" id="lodLakesOpacityVal">50%</span></div>
-              <input type="range" class="form-range" id="lodLakesOpacitySlider" min="10" max="100" value="50">
+            <div class="form-group" style="margin:2px 0 8px 0;">
+              <div class="form-label" style="font-size:10px;"><span>Krytí vodních ploch</span><span class="form-val" id="lodLakesOpacityVal">35%</span></div>
+              <input type="range" class="form-range" id="lodLakesOpacitySlider" min="5" max="100" value="35">
             </div>
 
+            <!-- Rivers -->
             <div class="toggle-item" style="padding:4px 0;">
-              <span>Hlavní řeky (Vltava, Sázava, Lužnice...)</span>
-              <label class="toggle-switch"><input type="checkbox" id="lodToggleRivers"><span class="toggle-slider"></span></label>
+              <span>Vrstva řek (Neruší na pozadí)</span>
+              <label class="toggle-switch"><input type="checkbox" id="lodToggleRivers" checked><span class="toggle-slider"></span></label>
             </div>
-            <div class="form-group" style="margin:4px 0 8px 0;">
-              <div class="form-label" style="font-size:10px;"><span>Šířka řek</span><span class="form-val" id="lodRiversWidthVal">3.0px</span></div>
-              <input type="range" class="form-range" id="lodRiversWidthSlider" min="1.0" max="8.0" step="0.5" value="3.0">
+            <div style="display:flex; gap:8px; margin-bottom:6px;">
+              <div class="form-group" style="flex:1; margin-bottom:0;">
+                <div class="form-label" style="font-size:10px;"><span>Množství toků</span></div>
+                <select id="lodRiverFilterRankSelect" class="tool-btn" style="width:100%; height:26px; background:var(--bg-panel); font-size:10px;">
+                  <option value="1">Pouze největší řeky</option>
+                  <option value="2">Hlavní toky a přítoky</option>
+                  <option value="3" selected>Všechny toky a potoky</option>
+                </select>
+              </div>
+              <div class="form-group" style="flex:1; margin-bottom:0;">
+                <div class="form-label" style="font-size:10px;"><span>Šířka řek</span><span class="form-val" id="lodRiversWidthVal">2.5px</span></div>
+                <input type="range" class="form-range" id="lodRiversWidthSlider" min="1.0" max="8.0" step="0.5" value="2.5">
+              </div>
+            </div>
+            <div class="form-group" style="margin:2px 0 8px 0;">
+              <div class="form-label" style="font-size:10px;"><span>Krytí řek na pozadí</span><span class="form-val" id="lodRiverOpacityVal">35%</span></div>
+              <input type="range" class="form-range" id="lodRiverOpacitySlider" min="5" max="100" value="35">
             </div>
 
+            <!-- Roads & Paths -->
             <div class="toggle-item" style="padding:4px 0;">
               <span>Dálnice a rychlostní tahy</span>
               <label class="toggle-switch"><input type="checkbox" id="lodToggleMotorways" checked><span class="toggle-slider"></span></label>
             </div>
-
             <div class="toggle-item" style="padding:4px 0;">
               <span>Silnice I. a II. třídy</span>
               <label class="toggle-switch"><input type="checkbox" id="lodTogglePrimaryRoads" checked><span class="toggle-slider"></span></label>
             </div>
-
             <div class="toggle-item" style="padding:4px 0;">
               <span>Místní a vedlejší cesty</span>
               <label class="toggle-switch"><input type="checkbox" id="lodToggleLocalRoads"><span class="toggle-slider"></span></label>
             </div>
-
             <div class="toggle-item" style="padding:4px 0;">
               <span>Cyklostezky a turistické trasy</span>
               <label class="toggle-switch"><input type="checkbox" id="lodTogglePaths"><span class="toggle-slider"></span></label>
             </div>
 
-            <div class="toggle-item" style="padding:4px 0;">
-              <span>Města a obce (Popisky)</span>
-              <label class="toggle-switch"><input type="checkbox" id="lodToggleSettlements" checked><span class="toggle-slider"></span></label>
+            <!-- POI Categories & Colors -->
+            <div style="background:var(--bg-panel); padding:8px; border-radius:4px; margin-top:8px;">
+              <div style="font-size:10.5px; font-weight:700; color:#fff; margin-bottom:6px;">Barvy a viditelnost bodů & obcí:</div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label style="display:flex; align-items:center; gap:6px; font-size:10.5px; cursor:pointer;">
+                  <input type="checkbox" id="lodToggleCities" checked> Krajská a velká města
+                </label>
+                <input type="color" id="lodColorCities" value="#FFFFFF" class="color-picker-input" style="width:22px; height:18px;">
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label style="display:flex; align-items:center; gap:6px; font-size:10.5px; cursor:pointer;">
+                  <input type="checkbox" id="lodToggleTowns" checked> Města a městečka
+                </label>
+                <input type="color" id="lodColorTowns" value="#CBD5E1" class="color-picker-input" style="width:22px; height:18px;">
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label style="display:flex; align-items:center; gap:6px; font-size:10.5px; cursor:pointer;">
+                  <input type="checkbox" id="lodToggleVillages" checked> Vesnice a osady
+                </label>
+                <input type="color" id="lodColorVillages" value="#94A3B8" class="color-picker-input" style="width:22px; height:18px;">
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label style="display:flex; align-items:center; gap:6px; font-size:10.5px; cursor:pointer;">
+                  <input type="checkbox" id="lodToggleLandmarks" checked> Hrady, zámky & vrcholy
+                </label>
+                <input type="color" id="lodColorLandmarks" value="#38BDF8" class="color-picker-input" style="width:22px; height:18px;">
+              </div>
             </div>
 
             <div style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
@@ -676,6 +752,15 @@
               <div class="form-label"><span>Název cílového místa</span></div>
               <input type="text" id="spotlightNameInput" class="tool-btn" style="width:100%; height:28px; text-align:left; padding:2px 8px;" value="Praha (Vyšehrad)">
             </div>
+            
+            <div class="form-group" style="margin-bottom:6px;">
+              <div class="form-label"><span>Směr kamery</span></div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                <button class="btn btn-secondary active" id="btnSpotlightZoomIn" style="justify-content:center; font-size:11px; padding:3px 6px;">🔍 Přiblížit (Zoom In)</button>
+                <button class="btn btn-secondary" id="btnSpotlightZoomOut" style="justify-content:center; font-size:11px; padding:3px 6px;">🌐 Oddálit (Zoom Out)</button>
+              </div>
+            </div>
+
             <div style="display:flex; gap:6px; margin-bottom:6px;">
               <div style="flex:1;">
                 <div style="font-size:10px; color:var(--text-muted); margin-bottom:2px;">Zeměpisná šířka (Lat):</div>
@@ -686,10 +771,28 @@
                 <input type="number" id="spotlightLonInput" class="tool-btn" style="width:100%; height:26px; text-align:left; padding:2px 6px;" step="0.0001" value="14.424340">
               </div>
             </div>
+
             <div class="form-group" style="margin-bottom:6px;">
-              <div class="form-label"><span>Detail přiblížení (Zoom)</span><span class="form-val" id="spotlightZoomVal">14.0x</span></div>
-              <input type="range" class="form-range" id="spotlightZoomSlider" min="9.0" max="17.0" step="0.5" value="14.0">
+              <div class="form-label"><span>Počáteční zoom (Pohled z výšky)</span><span class="form-val" id="spotlightStartZoomVal">8.0x</span></div>
+              <input type="range" class="form-range" id="spotlightStartZoomSlider" min="6.0" max="13.0" step="0.5" value="8.0">
             </div>
+
+            <div class="form-group" style="margin-bottom:6px;">
+              <div class="form-label"><span>Cílový detail (Přiblížený záběr)</span><span class="form-val" id="spotlightZoomVal">16.0x</span></div>
+              <input type="range" class="form-range" id="spotlightZoomSlider" min="11.0" max="18.0" step="0.5" value="16.0">
+            </div>
+
+            <div class="form-group" style="margin-bottom:6px;">
+              <div class="form-label"><span>Křivka zrychlení náletu (Speed Ramping)</span></div>
+              <select id="spotlightEasingSelect" class="tool-btn" style="width:100%; height:28px; background:var(--bg-panel); font-size:11px;">
+                <option value="smooth" selected>🔄 Plynulá S-křivka (Smoothstep)</option>
+                <option value="ease-in">🚀 Pozvolný rozjezd (Ease-In)</option>
+                <option value="ease-out">🎯 Plynulé dobrzdění (Ease-Out)</option>
+                <option value="punch">⚡ Dramatický přískok (Punch)</option>
+                <option value="linear">📏 Rovnoměrný lineární nálet</option>
+              </select>
+            </div>
+
             <div class="toggle-item" style="padding:4px 0;">
               <span>Odraz kamery na konci (Ending Rebound)</span>
               <label class="toggle-switch"><input type="checkbox" id="toggleSpotlightRebound" checked><span class="toggle-slider"></span></label>
@@ -810,9 +913,10 @@
         <div class="form-group">
           <div class="form-label"><span>Formát videa</span></div>
           <select id="exportFormatSelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);">
-            <option value="prores4444">Apple ProRes 4444 (.mov s Alpha kanálem) [Nativní pro DaVinci]</option>
-            <option value="png_sequence">PNG Sekvence snímků (.png)</option>
-            <option value="webm">WebM VP9 Průhledné (.webm)</option>
+            <option value="mp4" selected>MP4 H.264 (Rychlý, lehký náhled 15-30 MB • Web & Sociální sítě)</option>
+            <option value="webm">WebM VP9 (Průhledné s Alpha kanálem • Malá velikost)</option>
+            <option value="prores4444">Apple ProRes 4444 (.mov s Alpha kanálem) [Nativní DaVinci Resolve Master]</option>
+            <option value="png_sequence">PNG Sekvence jednotlivých snímků</option>
           </select>
         </div>
 
@@ -835,9 +939,14 @@
           </div>
         </div>
 
-        <div class="toggle-item" style="margin-bottom:12px;">
+        <div class="toggle-item" style="margin-bottom:8px;">
           <span>Motion Blur (180° pohybové rozmazání kamery)</span>
           <label class="toggle-switch"><input type="checkbox" id="exportMotionBlur"><span class="toggle-slider"></span></label>
+        </div>
+
+        <div class="toggle-item" style="margin-bottom:12px;">
+          <span>Exportovat na pozadí (neblokuje práci v okně)</span>
+          <label class="toggle-switch"><input type="checkbox" id="exportBackgroundToggle" checked><span class="toggle-slider"></span></label>
         </div>
 
         <div class="progress-container" id="exportProgressContainer" style="display:none;">
@@ -851,9 +960,12 @@
         <div class="export-result-box" id="exportResultBox">
           <div style="font-weight:700; color:var(--accent-emerald); margin-bottom:4px;">✓ Export dokončen!</div>
           <div style="color:var(--text-muted); font-size:11px;" id="exportResultDetails"></div>
-          <div style="margin-top:10px; display:flex; gap:8px;">
+          <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
             <a id="btnDownloadExport" href="#" class="btn btn-primary" download style="text-decoration:none; padding:4px 12px; font-size:11px;">
               ⬇ Stáhnout video
+            </a>
+            <a id="btnDownloadExportSnapshot" href="#" class="btn btn-secondary" download style="display:none; text-decoration:none; padding:4px 12px; font-size:11px;">
+              📄 Stáhnout projektový recept (.json)
             </a>
             <button class="btn btn-secondary" id="btnCopyExportPath" style="padding:4px 12px; font-size:11px;">
               📋 Zkopírovat cestu k souboru
@@ -864,6 +976,47 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" id="btnCancelExport">Zavřít</button>
         <button class="btn btn-emerald" id="btnStartExport">🚀 Spustit render videa</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD WAYPOINT MODAL -->
+  <div class="modal-overlay" id="addWaypointModal" style="display:none;">
+    <div class="modal-card" style="width:440px;">
+      <div class="modal-header">
+        <span>🚩 Přidat Bod Zájmu na Trasu</span>
+        <button class="modal-close-btn" id="btnCloseAddWaypointModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <div class="form-label"><span>Název bodu</span></div>
+          <input type="text" id="newWpTitleInput" class="tool-btn" style="width:100%; height:32px; text-align:left; background:var(--bg-input); font-weight:700;" placeholder="Např. Vyhlídka na kaňon Vltavy">
+        </div>
+        <div class="form-group">
+          <div class="form-label"><span>Podtitulek / Popis</span></div>
+          <input type="text" id="newWpSubtitleInput" class="tool-btn" style="width:100%; height:30px; text-align:left; background:var(--bg-input);" placeholder="Např. Skalní vyhlídka • km 42.5">
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:12px;">
+          <div class="form-group" style="flex:1;">
+            <div class="form-label"><span>Kategorie / Ikona</span></div>
+            <select id="newWpCategorySelect" class="tool-btn" style="width:100%; height:32px; background:var(--bg-input);">
+              <option value="flag" selected>🚩 Cíl / Milník</option>
+              <option value="viewpoint">👁️ Vyhlídka</option>
+              <option value="peak">⛰️ Vrchol kopce</option>
+              <option value="castle">🏰 Hrad či Zámek</option>
+              <option value="cafe">☕ Občerstvení / Hospoda</option>
+              <option value="photo">📷 Foto spot</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1;">
+            <div class="form-label"><span>Pozice na trase (km)</span></div>
+            <input type="number" id="newWpKmInput" class="tool-btn" style="width:100%; height:32px; text-align:left; background:var(--bg-input);" min="0" step="0.1" value="0.0">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCancelAddWaypoint">Zrušit</button>
+        <button class="btn btn-emerald" id="btnConfirmAddWaypoint">✓ Uložit bod do mapy</button>
       </div>
     </div>
   </div>
